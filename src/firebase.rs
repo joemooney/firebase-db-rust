@@ -255,6 +255,111 @@ impl FirebaseClient {
     pub fn query_builder(collection: &str) -> QueryBuilder {
         QueryBuilder::new(collection)
     }
+    
+    // Generic CRUD methods for working with serde_json::Value
+    pub async fn create_document(&self, collection: &str, doc_id: Option<String>, data: serde_json::Value) -> Result<String> {
+        let fields = json_to_firestore_fields(data)?;
+        let request = CreateDocumentRequest { fields };
+        
+        let url = if let Some(id) = doc_id {
+            format!("{}?key={}&documentId={}", 
+                format!("{}/{}", self.base_url, collection.trim_start_matches('/')), 
+                self.api_key, id)
+        } else {
+            format!("{}?key={}", 
+                format!("{}/{}", self.base_url, collection.trim_start_matches('/')), 
+                self.api_key)
+        };
+        
+        let response = self.client
+            .post(&url)
+            .json(&request)
+            .send()
+            .await?;
+        
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(FirebaseError::DatabaseError(format!("Create failed: {}", error_text)));
+        }
+        
+        let document: Document = response.json().await?;
+        let doc_id = document.name.split('/').last().unwrap_or("unknown").to_string();
+        Ok(doc_id)
+    }
+    
+    pub async fn get_document(&self, collection: &str, doc_id: &str) -> Result<serde_json::Value> {
+        let url = format!("{}/{}?key={}", 
+            format!("{}/{}", self.base_url, collection.trim_start_matches('/')), 
+            doc_id, self.api_key);
+        
+        let response = self.client
+            .get(&url)
+            .send()
+            .await?;
+        
+        if response.status().as_u16() == 404 {
+            return Err(FirebaseError::NotFound(format!("Document '{}' not found in collection '{}'", doc_id, collection)));
+        }
+        
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(FirebaseError::DatabaseError(format!("Get failed: {}", error_text)));
+        }
+        
+        let document: Document = response.json().await?;
+        firestore_fields_to_json(document.fields)
+    }
+    
+    pub async fn update_document(&self, collection: &str, doc_id: &str, data: serde_json::Value, merge: bool) -> Result<()> {
+        let fields = json_to_firestore_fields(data)?;
+        let request = UpdateDocumentRequest { fields };
+        
+        let update_mask = if merge {
+            let field_names: Vec<String> = request.fields.keys().cloned().collect();
+            format!("&updateMask.fieldPaths={}", field_names.join("&updateMask.fieldPaths="))
+        } else {
+            String::new()
+        };
+        
+        let url = format!("{}/{}?key={}{}", 
+            format!("{}/{}", self.base_url, collection.trim_start_matches('/')), 
+            doc_id, self.api_key, update_mask);
+        
+        let response = self.client
+            .patch(&url)
+            .json(&request)
+            .send()
+            .await?;
+        
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(FirebaseError::DatabaseError(format!("Update failed: {}", error_text)));
+        }
+        
+        Ok(())
+    }
+    
+    pub async fn delete_document(&self, collection: &str, doc_id: &str) -> Result<()> {
+        let url = format!("{}/{}?key={}", 
+            format!("{}/{}", self.base_url, collection.trim_start_matches('/')), 
+            doc_id, self.api_key);
+        
+        let response = self.client
+            .delete(&url)
+            .send()
+            .await?;
+        
+        if response.status().as_u16() == 404 {
+            return Err(FirebaseError::NotFound(format!("Document '{}' not found in collection '{}'", doc_id, collection)));
+        }
+        
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(FirebaseError::DatabaseError(format!("Delete failed: {}", error_text)));
+        }
+        
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -268,4 +373,89 @@ struct QueryDocumentResponse {
     document: Option<Document>,
     #[serde(rename = "readTime")]
     read_time: Option<String>,
+}
+
+// Helper functions for JSON <-> Firestore conversion
+fn json_to_firestore_fields(value: serde_json::Value) -> Result<HashMap<String, FirestoreValue>> {
+    let mut fields = HashMap::new();
+    
+    if let serde_json::Value::Object(map) = value {
+        for (key, val) in map {
+            fields.insert(key, json_value_to_firestore(val)?);
+        }
+    } else {
+        return Err(FirebaseError::ValidationError("Root value must be an object".to_string()));
+    }
+    
+    Ok(fields)
+}
+
+fn json_value_to_firestore(value: serde_json::Value) -> Result<FirestoreValue> {
+    match value {
+        serde_json::Value::String(s) => Ok(FirestoreValue::StringValue(s)),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(FirestoreValue::IntegerValue(i.to_string()))
+            } else if let Some(f) = n.as_f64() {
+                Ok(FirestoreValue::DoubleValue(f))
+            } else {
+                Ok(FirestoreValue::StringValue(n.to_string()))
+            }
+        }
+        serde_json::Value::Bool(b) => Ok(FirestoreValue::BooleanValue(b)),
+        serde_json::Value::Null => Ok(FirestoreValue::NullValue),
+        serde_json::Value::Array(arr) => {
+            let mut values = Vec::new();
+            for item in arr {
+                values.push(json_value_to_firestore(item)?);
+            }
+            Ok(FirestoreValue::ArrayValue { values })
+        }
+        serde_json::Value::Object(map) => {
+            let mut fields = HashMap::new();
+            for (key, val) in map {
+                fields.insert(key, json_value_to_firestore(val)?);
+            }
+            Ok(FirestoreValue::MapValue { fields })
+        }
+    }
+}
+
+fn firestore_fields_to_json(fields: HashMap<String, FirestoreValue>) -> Result<serde_json::Value> {
+    let mut map = serde_json::Map::new();
+    
+    for (key, value) in fields {
+        map.insert(key, firestore_value_to_json(value)?);
+    }
+    
+    Ok(serde_json::Value::Object(map))
+}
+
+fn firestore_value_to_json(value: FirestoreValue) -> Result<serde_json::Value> {
+    match value {
+        FirestoreValue::StringValue(s) => Ok(serde_json::Value::String(s)),
+        FirestoreValue::IntegerValue(i) => {
+            Ok(serde_json::Value::Number(serde_json::Number::from(i.parse::<i64>().unwrap_or(0))))
+        }
+        FirestoreValue::DoubleValue(f) => {
+            Ok(serde_json::Value::Number(serde_json::Number::from_f64(f).unwrap_or(serde_json::Number::from(0))))
+        }
+        FirestoreValue::BooleanValue(b) => Ok(serde_json::Value::Bool(b)),
+        FirestoreValue::NullValue => Ok(serde_json::Value::Null),
+        FirestoreValue::TimestampValue(ts) => Ok(serde_json::Value::String(ts)),
+        FirestoreValue::ArrayValue { values } => {
+            let mut json_arr = Vec::new();
+            for val in values {
+                json_arr.push(firestore_value_to_json(val)?);
+            }
+            Ok(serde_json::Value::Array(json_arr))
+        }
+        FirestoreValue::MapValue { fields } => {
+            let mut json_map = serde_json::Map::new();
+            for (key, val) in fields {
+                json_map.insert(key, firestore_value_to_json(val)?);
+            }
+            Ok(serde_json::Value::Object(json_map))
+        }
+    }
 }

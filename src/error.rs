@@ -22,6 +22,9 @@ pub enum FirebaseError {
     
     #[error("Database operation failed: {0}")]
     DatabaseError(String),
+    
+    #[error("Validation failed: {0}")]
+    ValidationError(String),
 }
 
 pub type Result<T> = std::result::Result<T, FirebaseError>;

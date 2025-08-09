@@ -6,6 +6,7 @@ pub mod schema;
 pub mod security_rules;
 pub mod json_manager;
 pub mod collections;
+pub mod tui_form;
 
 pub use firebase::FirebaseClient;
 pub use models::*;
@@ -15,3 +16,4 @@ pub use schema::{SchemaManager, Collection, Field, FieldType, Index, IndexField,
 pub use security_rules::{SecurityRules, RuleBuilder, Expression, Permission};
 pub use json_manager::{JsonSchemaManager, JsonSchema, JsonCollection, JsonField, DataExport};
 pub use collections::{CollectionManager, CollectionInfo, CollectionSchema, FieldInfo};
+pub use tui_form::{TuiForm, FormField};
