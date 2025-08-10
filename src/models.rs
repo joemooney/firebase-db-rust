@@ -42,9 +42,42 @@ pub enum FirestoreValue {
     DoubleValue(f64),
     BooleanValue(bool),
     TimestampValue(String),
-    MapValue { fields: HashMap<String, FirestoreValue> },
-    ArrayValue { values: Vec<FirestoreValue> },
-    NullValue,
+    MapValue { 
+        fields: HashMap<String, FirestoreValue> 
+    },
+    #[serde(with = "array_value_serde")]
+    ArrayValue { 
+        values: Vec<FirestoreValue> 
+    },
+    #[serde(rename = "nullValue")]
+    NullValue(Option<()>),
+}
+
+mod array_value_serde {
+    use super::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    
+    #[derive(Serialize, Deserialize)]
+    struct ArrayValueWrapper {
+        values: Vec<FirestoreValue>,
+    }
+    
+    pub fn serialize<S>(values: &Vec<FirestoreValue>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        ArrayValueWrapper { 
+            values: values.clone() 
+        }.serialize(serializer)
+    }
+    
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<FirestoreValue>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wrapper = ArrayValueWrapper::deserialize(deserializer)?;
+        Ok(wrapper.values)
+    }
 }
 
 pub trait ToFirestore {

@@ -61,6 +61,23 @@ enum SchemaActions {
         #[arg(short, long)]
         file: String,
     },
+    /// Discover and save schema to Firestore schemas collection
+    Sync {
+        /// Collection name to discover and sync
+        #[arg(short, long)]
+        collection: String,
+        /// Number of sample documents to analyze (default: 50)
+        #[arg(short, long, default_value = "50")]
+        samples: usize,
+    },
+    /// List all schemas stored in Firestore
+    List,
+    /// Show detailed information about a schema stored in Firestore
+    Show {
+        /// Collection name
+        #[arg(short, long)]
+        collection: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -263,6 +280,121 @@ async fn handle_schema_command(
                 }
             }
         }
+        SchemaActions::Sync { collection, samples } => {
+            println!("🔍 Discovering schema for collection '{}'...", collection);
+            match json_manager.discover_and_save_schema(&collection, samples).await {
+                Ok(schema) => {
+                    println!("✅ Schema discovered and saved to Firestore");
+                    println!("📊 Collection: {}", schema.collection_name);
+                    println!("📝 Fields found: {}", schema.fields.len());
+                    println!("📄 Documents analyzed: {}", schema.total_documents);
+                    println!("📅 Last updated: {}", schema.last_updated);
+                },
+                Err(e) => {
+                    println!("❌ Failed to discover and save schema: {}", e);
+                    return Err(e);
+                }
+            }
+        }
+        SchemaActions::List => {
+            println!("📋 Listing all schemas stored in Firestore...");
+            match json_manager.list_firestore_schemas().await {
+                Ok(schemas) => {
+                    if schemas.is_empty() {
+                        println!("📭 No schemas found in Firestore");
+                        println!("💡 Use 'schema sync -c <collection>' to discover and save schemas");
+                    } else {
+                        println!("Found {} schema(s):\n", schemas.len());
+                        for schema in schemas {
+                            println!("🗂️  Collection: {}", schema.collection_name);
+                            println!("   📊 Fields: {}", schema.fields.len());
+                            println!("   📄 Documents: {}", schema.total_documents);
+                            println!("   📅 Updated: {}", schema.last_updated);
+                            println!("   🔧 Source: {}", schema.discovery_source);
+                            println!();
+                        }
+                    }
+                },
+                Err(e) => {
+                    println!("❌ Failed to list schemas: {}", e);
+                    return Err(e);
+                }
+            }
+        }
+        SchemaActions::Show { collection } => {
+            println!("📖 Loading schema for collection '{}'...", collection);
+            match json_manager.load_schema_from_firestore(&collection).await {
+                Ok(Some(schema)) => {
+                    println!("✅ Schema found for collection '{}'", collection);
+                    println!("📊 Collection: {}", schema.collection_name);
+                    println!("📝 Version: {}", schema.version);
+                    println!("📅 Last updated: {}", schema.last_updated);
+                    println!("📄 Total documents: {}", schema.total_documents);
+                    println!("🔧 Discovery source: {}", schema.discovery_source);
+                    if let Some(desc) = &schema.description {
+                        println!("📋 Description: {}", desc);
+                    }
+                    println!("\n🏷️  Fields ({}):", schema.fields.len());
+                    println!("{}", "─".repeat(60));
+                    
+                    use comfy_table::{Table, Cell, Color, Attribute, ContentArrangement};
+                    let mut table = Table::new();
+                    table.set_content_arrangement(ContentArrangement::Dynamic);
+                    table.set_header(vec![
+                        Cell::new("Field").add_attribute(Attribute::Bold).fg(Color::Cyan),
+                        Cell::new("Type").add_attribute(Attribute::Bold).fg(Color::Cyan),
+                        Cell::new("Required").add_attribute(Attribute::Bold).fg(Color::Cyan),
+                        Cell::new("Description").add_attribute(Attribute::Bold).fg(Color::Cyan),
+                        Cell::new("Sample Values").add_attribute(Attribute::Bold).fg(Color::Cyan),
+                    ]);
+                    
+                    for field in &schema.fields {
+                        let required_str = if field.required { "Yes" } else { "No" };
+                        let desc = field.description.as_deref().unwrap_or("-");
+                        let samples = if field.sample_values.is_empty() {
+                            "-".to_string()
+                        } else {
+                            field.sample_values.iter().take(3).cloned().collect::<Vec<_>>().join(", ")
+                        };
+                        
+                        table.add_row(vec![
+                            Cell::new(&field.name).fg(Color::Yellow),
+                            Cell::new(&field.field_type).fg(Color::Green),
+                            Cell::new(required_str).fg(if field.required { Color::Red } else { Color::Grey }),
+                            Cell::new(desc),
+                            Cell::new(samples).fg(Color::Blue),
+                        ]);
+                    }
+                    
+                    println!("{}", table);
+                    
+                    if !schema.validation_rules.is_empty() {
+                        println!("\n✅ Validation Rules:");
+                        for rule in &schema.validation_rules {
+                            println!("  • {}: {}", rule.field, rule.rule_type);
+                        }
+                    }
+                    
+                    if !schema.indexes.is_empty() {
+                        println!("\n🔍 Indexes:");
+                        for index in &schema.indexes {
+                            let fields: Vec<String> = index.fields.iter()
+                                .map(|f| format!("{} ({})", f.field_path, f.order))
+                                .collect();
+                            println!("  • {}{}", fields.join(", "), if index.unique { " (unique)" } else { "" });
+                        }
+                    }
+                },
+                Ok(None) => {
+                    println!("❌ No schema found for collection '{}'", collection);
+                    println!("💡 Use 'schema sync -c {}' to discover and save the schema", collection);
+                },
+                Err(e) => {
+                    println!("❌ Failed to load schema: {}", e);
+                    return Err(e);
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -276,10 +408,18 @@ async fn handle_data_command(
     
     match action {
         DataActions::Create { collection, id, json, interactive, fields } => {
+            // Check if user is asking for help
+            if fields.len() == 1 && fields[0].to_lowercase() == "help" {
+                // Show collection-specific help
+                show_collection_help(&collection, json_manager, collection_manager).await?;
+                return Ok(());
+            }
+            
             let data = if !fields.is_empty() {
                 // Parse field arguments
                 println!("📝 Creating document from field arguments...");
-                parse_field_arguments(&fields)?
+                let parsed_data = parse_field_arguments(&fields)?;
+                add_timestamps_to_document(parsed_data)
             } else if interactive || json.is_none() {
                 // Use TUI form
                 let schema = match collection_manager.describe_collection(&collection, 10).await {
@@ -299,16 +439,37 @@ async fn handle_data_command(
                 println!("🖥️ Opening interactive form for document creation...");
                 
                 match form.run()? {
-                    Some(data) => data,
+                    Some(data) => add_timestamps_to_document(data),
                     None => {
                         println!("❌ Document creation cancelled");
                         return Ok(());
                     }
                 }
             } else {
-                serde_json::from_str(&json.unwrap())
-                    .map_err(|e| FirebaseError::ValidationError(format!("Invalid JSON: {}", e)))?
+                let json_data = serde_json::from_str(&json.unwrap())
+                    .map_err(|e| FirebaseError::ValidationError(format!("Invalid JSON: {}", e)))?;
+                add_timestamps_to_document(json_data)
             };
+            
+            // Validate against stored schema if available
+            println!("🔍 Validating against stored schema...");
+            match json_manager.validate_against_schema(&collection, &data).await {
+                Ok(errors) => {
+                    if !errors.is_empty() {
+                        println!("⚠️ Validation warnings:");
+                        for error in &errors {
+                            println!("  • {}", error);
+                        }
+                        println!("📝 Proceeding with creation despite warnings...");
+                    } else {
+                        println!("✅ Data validates against schema");
+                    }
+                },
+                Err(_) => {
+                    // Schema validation failed (e.g., no schema found) - continue anyway
+                    println!("💡 No schema found for validation, proceeding...");
+                }
+            }
             
             println!("🔄 Creating document in collection '{}'...", collection);
             let doc_id = client.create_document(&collection, id, data).await?;
@@ -327,8 +488,7 @@ async fn handle_data_command(
                     display_document_table(&id, &data);
                 }
                 "yaml" => {
-                    // Simple YAML-like output
-                    display_document_yaml(&id, &data);
+                    println!("{}", serde_yaml::to_string(&data).unwrap_or_else(|e| format!("Error serializing to YAML: {}", e)));
                 }
                 _ => {
                     println!("❌ Unsupported format '{}'. Use: json, table, or yaml", format);
@@ -346,15 +506,16 @@ async fn handle_data_command(
                 println!("🖥️ Opening interactive form for document update...");
                 
                 match form.run()? {
-                    Some(data) => data,
+                    Some(data) => add_updated_timestamp(data),
                     None => {
                         println!("❌ Document update cancelled");
                         return Ok(());
                     }
                 }
             } else {
-                serde_json::from_str(&json.unwrap())
-                    .map_err(|e| FirebaseError::ValidationError(format!("Invalid JSON: {}", e)))?
+                let json_data = serde_json::from_str(&json.unwrap())
+                    .map_err(|e| FirebaseError::ValidationError(format!("Invalid JSON: {}", e)))?;
+                add_updated_timestamp(json_data)
             };
             
             let merge_mode = !replace;
@@ -421,13 +582,20 @@ async fn handle_data_command(
                             println!();
                         }
                     }
+                    "yaml" => {
+                        for (i, (doc_id, data)) in documents.iter().enumerate() {
+                            println!("# Document {}: {}", i + 1, doc_id);
+                            println!("{}", serde_yaml::to_string(data).unwrap_or_else(|e| format!("Error serializing to YAML: {}", e)));
+                            println!();
+                        }
+                    }
                     "text" => {
                         for (i, (doc_id, data)) in documents.iter().enumerate() {
                             println!("{}. {} - {} fields", i + 1, doc_id, count_fields(data));
                         }
                     }
                     _ => {
-                        println!("❌ Unsupported format '{}'. Use: table, json, or text", format);
+                        println!("❌ Unsupported format '{}'. Use: table, json, yaml, or text", format);
                         return Err(FirebaseError::ValidationError(format!("Unsupported format: {}", format)));
                     }
                 }
@@ -578,7 +746,7 @@ fn firestore_value_to_json_value(value: &FirestoreValue) -> Result<serde_json::V
             Ok(serde_json::Value::Number(serde_json::Number::from_f64(*f).unwrap_or(serde_json::Number::from(0))))
         }
         FirestoreValue::BooleanValue(b) => Ok(serde_json::Value::Bool(*b)),
-        FirestoreValue::NullValue => Ok(serde_json::Value::Null),
+        FirestoreValue::NullValue(_) => Ok(serde_json::Value::Null),
         FirestoreValue::TimestampValue(ts) => Ok(serde_json::Value::String(ts.clone())),
         _ => Ok(serde_json::Value::String("(complex value)".to_string())),
     }
@@ -749,6 +917,36 @@ fn parse_field_arguments(fields: &[String]) -> Result<serde_json::Value, Firebas
     Ok(serde_json::Value::Object(map))
 }
 
+// Add automatic timestamps for created_at and updated_at if not provided
+fn add_automatic_timestamps(map: &mut serde_json::Map<String, serde_json::Value>) {
+    let current_time = chrono::Utc::now().to_rfc3339();
+    
+    // Add created_at if not provided
+    if !map.contains_key("created_at") {
+        map.insert("created_at".to_string(), serde_json::Value::String(current_time.clone()));
+    }
+    
+    // Add updated_at if not provided (or update existing one)
+    map.insert("updated_at".to_string(), serde_json::Value::String(current_time));
+}
+
+// Add automatic timestamps to any JSON value (for all input methods)
+fn add_timestamps_to_document(mut data: serde_json::Value) -> serde_json::Value {
+    if let serde_json::Value::Object(ref mut map) = data {
+        add_automatic_timestamps(map);
+    }
+    data
+}
+
+// Add only updated_at timestamp for update operations
+fn add_updated_timestamp(mut data: serde_json::Value) -> serde_json::Value {
+    if let serde_json::Value::Object(ref mut map) = data {
+        let current_time = chrono::Utc::now().to_rfc3339();
+        map.insert("updated_at".to_string(), serde_json::Value::String(current_time));
+    }
+    data
+}
+
 // Parse field value with automatic type inference
 fn parse_field_value_with_inference(value_str: &str) -> Result<serde_json::Value, FirebaseError> {
     let trimmed = value_str.trim();
@@ -819,4 +1017,220 @@ fn parse_field_value_with_inference(value_str: &str) -> Result<serde_json::Value
     
     // Default to string
     Ok(serde_json::Value::String(trimmed.to_string()))
+}
+
+// Show collection-specific help for create command
+async fn show_collection_help(
+    collection_name: &str,
+    json_manager: &JsonSchemaManager,
+    collection_manager: &CollectionManager,
+) -> Result<(), FirebaseError> {
+    use comfy_table::{Table, Cell, Color, Attribute, ContentArrangement};
+    
+    println!("📚 Collection Help: '{}'", collection_name);
+    println!("{}", "=".repeat(60));
+    println!();
+    
+    // Try to get schema from both sources: defined schemas and discovered schemas
+    let mut has_schema = false;
+    
+    // First, check if there's a manually defined schema
+    let defined_schemas = json_manager.get_schemas();
+    let defined_schema = defined_schemas.iter()
+        .find(|s| s.name == collection_name);
+    
+    if let Some(schema) = defined_schema {
+        has_schema = true;
+        println!("📋 Defined Schema Fields:");
+        println!("{}", "-".repeat(40));
+        
+        let mut table = Table::new();
+        table.set_content_arrangement(ContentArrangement::Dynamic);
+        table.set_header(vec![
+            Cell::new("Field").add_attribute(Attribute::Bold).fg(Color::Cyan),
+            Cell::new("Type").add_attribute(Attribute::Bold).fg(Color::Cyan),
+            Cell::new("Required").add_attribute(Attribute::Bold).fg(Color::Cyan),
+            Cell::new("Default").add_attribute(Attribute::Bold).fg(Color::Cyan),
+            Cell::new("Description").add_attribute(Attribute::Bold).fg(Color::Cyan),
+        ]);
+        
+        for field in &schema.fields {
+            let required_str = if field.required { "Yes ✓" } else { "No" };
+            let default_str = field.default_value
+                .as_ref()
+                .map(|v| format_json_value_compact(v))
+                .unwrap_or_else(|| "-".to_string());
+            let description = field.description
+                .as_ref()
+                .map(|d| d.clone())
+                .unwrap_or_else(|| "-".to_string());
+            
+            table.add_row(vec![
+                Cell::new(&field.name).fg(Color::Yellow),
+                Cell::new(&field.field_type).fg(Color::Green),
+                Cell::new(required_str).fg(if field.required { Color::Red } else { Color::Grey }),
+                Cell::new(default_str),
+                Cell::new(description),
+            ]);
+        }
+        
+        println!("{}", table);
+        println!();
+        
+        // Show validation rules if any
+        if !schema.validation_rules.is_empty() {
+            println!("✅ Validation Rules:");
+            for rule in &schema.validation_rules {
+                println!("  • {}: {:?}", rule.field, rule.rule_type);
+            }
+            println!();
+        }
+    }
+    
+    // Also try to discover from actual data
+    match collection_manager.describe_collection(collection_name, 10).await {
+        Ok(discovered_schema) => {
+            if !has_schema || discovered_schema.total_documents > 0 {
+                println!("🔍 Discovered Fields (from {} documents):", discovered_schema.total_documents);
+                println!("{}", "-".repeat(40));
+                
+                if discovered_schema.fields.is_empty() {
+                    println!("  No fields discovered yet. Collection may be empty.");
+                } else {
+                    let mut table = Table::new();
+                    table.set_content_arrangement(ContentArrangement::Dynamic);
+                    table.set_header(vec![
+                        Cell::new("Field").add_attribute(Attribute::Bold).fg(Color::Cyan),
+                        Cell::new("Type").add_attribute(Attribute::Bold).fg(Color::Cyan),
+                        Cell::new("Found In").add_attribute(Attribute::Bold).fg(Color::Cyan),
+                        Cell::new("Sample Values").add_attribute(Attribute::Bold).fg(Color::Cyan),
+                    ]);
+                    
+                    for field in &discovered_schema.fields {
+                        let frequency_str = format!("{}/{} docs", 
+                            field.frequency, 
+                            discovered_schema.total_documents
+                        );
+                        
+                        let samples = if field.sample_values.len() > 3 {
+                            format!("{}, ...", field.sample_values[..3].join(", "))
+                        } else {
+                            field.sample_values.join(", ")
+                        };
+                        
+                        table.add_row(vec![
+                            Cell::new(&field.name).fg(Color::Yellow),
+                            Cell::new(&field.field_type).fg(Color::Green),
+                            Cell::new(&frequency_str).fg(
+                                if field.is_required { Color::Red } else { Color::Grey }
+                            ),
+                            Cell::new(&samples),
+                        ]);
+                    }
+                    
+                    println!("{}", table);
+                    println!();
+                }
+                has_schema = true;
+            }
+        }
+        Err(_) => {
+            if !has_schema {
+                println!("⚠️  No schema found for collection '{}'", collection_name);
+                println!("   The collection may not exist or may be empty.");
+                println!();
+            }
+        }
+    }
+    
+    // Show usage examples
+    println!("📝 Usage Examples:");
+    println!("{}", "-".repeat(40));
+    println!();
+    
+    println!("Create with field arguments:");
+    println!("  cargo run --bin firebase-cli data create -c {} \\", collection_name);
+    
+    if has_schema {
+        // Show example based on discovered or defined fields
+        if let Some(schema) = defined_schema {
+            let mut example_fields = Vec::new();
+            for (i, field) in schema.fields.iter().enumerate() {
+                if i >= 3 { break; } // Show max 3 fields in example
+                
+                let example_value = match field.field_type.as_str() {
+                    "string" | "String" => format!("{}=\"example\"", field.name),
+                    "integer" | "Integer" => format!("{}=123", field.name),
+                    "number" | "Number" | "float" | "Float" => format!("{}=45.67", field.name),
+                    "boolean" | "Boolean" => format!("{}=true", field.name),
+                    "timestamp" | "Timestamp" => format!("{}=now", field.name),
+                    "array" | "Array" => format!("{}='[\"item1\",\"item2\"]'", field.name),
+                    "object" | "Object" | "map" | "Map" => format!("{}='{{\"key\":\"value\"}}'", field.name),
+                    _ => format!("{}=\"value\"", field.name),
+                };
+                example_fields.push(format!("    {}", example_value));
+            }
+            
+            if !example_fields.is_empty() {
+                println!("{}", example_fields.join(" \\\n"));
+            } else {
+                println!("    field1=\"value1\" field2=123 field3=true");
+            }
+        } else {
+            println!("    field1=\"value1\" field2=123 field3=true");
+        }
+    } else {
+        println!("    name=\"Example\" value=123 active=true");
+    }
+    
+    println!();
+    println!("Create with JSON:");
+    println!("  cargo run --bin firebase-cli data create -c {} \\", collection_name);
+    println!("    -j '{{\"field1\":\"value\",\"field2\":123}}'");
+    println!();
+    
+    println!("Create with interactive TUI form:");
+    println!("  cargo run --bin firebase-cli data create -c {}", collection_name);
+    println!();
+    
+    // Show field format help
+    println!("💡 Field Format Tips:");
+    println!("{}", "-".repeat(40));
+    println!("  • Strings: name=\"John Doe\" or name='Jane Smith'");
+    println!("  • Numbers: age=30 or price=29.99");
+    println!("  • Booleans: active=true or enabled=false");
+    println!("  • Arrays: tags='[\"tag1\",\"tag2\"]'");
+    println!("  • Objects: data='{{\"key\":\"value\"}}'");
+    println!("  • Timestamps: created_at=now or date=\"2024-01-01T00:00:00Z\"");
+    println!("  • Null: optional=null");
+    println!();
+    
+    println!("🤖 Auto-Generated Fields:");
+    println!("  • created_at: Automatically added with current timestamp if not provided");
+    println!("  • updated_at: Always set to current timestamp on create/update");
+    println!("  💡 You don't need to supply these fields - they're handled automatically!");
+    println!();
+    
+    println!("📖 For more help:");
+    println!("  cargo run --bin firebase-cli data create --help");
+    println!();
+    
+    Ok(())
+}
+
+fn format_json_value_compact(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => {
+            if s.len() > 20 {
+                format!("\"{}...\"", &s[..17])
+            } else {
+                format!("\"{}\"", s)
+            }
+        }
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Array(arr) => format!("[{} items]", arr.len()),
+        serde_json::Value::Object(obj) => format!("{{{} fields}}", obj.len()),
+        serde_json::Value::Null => "null".to_string(),
+    }
 }

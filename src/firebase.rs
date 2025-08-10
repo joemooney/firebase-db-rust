@@ -79,11 +79,12 @@ impl FirebaseClient {
             return Err(FirebaseError::DatabaseError(format!("Failed to create document: {}", error_text)));
         }
         
-        let doc: Document = response.json().await?;
+        let response_text = response.text().await?;
+        let raw_doc: serde_json::Value = serde_json::from_str(&response_text)?;
         
-        let doc_id = doc.name
-            .split('/')
-            .last()
+        let doc_id = raw_doc.get("name")
+            .and_then(|n| n.as_str())
+            .and_then(|name| name.split('/').last())
             .ok_or_else(|| FirebaseError::DatabaseError("Invalid document name".to_string()))?
             .to_string();
         
@@ -113,8 +114,16 @@ impl FirebaseClient {
             return Err(FirebaseError::DatabaseError(format!("Failed to get document: {}", error_text)));
         }
         
-        let doc: Document = response.json().await?;
-        T::from_firestore(&doc.fields)
+        let response_text = response.text().await?;
+        let raw_doc: serde_json::Value = serde_json::from_str(&response_text)?;
+        
+        if let Some(fields) = raw_doc.get("fields") {
+            let json_data = convert_raw_firestore_fields_to_json(fields)?;
+            let firestore_fields = json_to_firestore_fields(json_data)?;
+            T::from_firestore(&firestore_fields)
+        } else {
+            Err(FirebaseError::DatabaseError("Document has no fields".to_string()))
+        }
     }
     
     pub async fn update<T: ToFirestore>(&self, collection: &str, doc_id: &str, item: &T) -> Result<()> {
@@ -194,14 +203,25 @@ impl FirebaseClient {
             return Err(FirebaseError::DatabaseError(format!("Failed to list documents: {}", error_text)));
         }
         
-        let list_response: ListDocumentsResponse = response.json().await?;
+        let response_text = response.text().await?;
+        let raw_list_response: serde_json::Value = serde_json::from_str(&response_text)?;
         
         let mut results = Vec::new();
-        if let Some(documents) = list_response.documents {
-            for doc in documents {
-                match T::from_firestore(&doc.fields) {
-                    Ok(item) => results.push(item),
-                    Err(e) => eprintln!("Failed to parse document: {:?}", e),
+        if let Some(documents_array) = raw_list_response.get("documents").and_then(|d| d.as_array()) {
+            for doc in documents_array {
+                if let Some(fields) = doc.get("fields") {
+                    match convert_raw_firestore_fields_to_json(fields) {
+                        Ok(json_data) => {
+                            // Try to convert from the raw JSON data
+                            if let Ok(firestore_fields) = json_to_firestore_fields(json_data) {
+                                match T::from_firestore(&firestore_fields) {
+                                    Ok(item) => results.push(item),
+                                    Err(e) => eprintln!("Failed to parse document: {:?}", e),
+                                }
+                            }
+                        },
+                        Err(e) => eprintln!("Failed to convert fields: {:?}", e),
+                    }
                 }
             }
         }
@@ -282,8 +302,15 @@ impl FirebaseClient {
             return Err(FirebaseError::DatabaseError(format!("Create failed: {}", error_text)));
         }
         
-        let document: Document = response.json().await?;
-        let doc_id = document.name.split('/').last().unwrap_or("unknown").to_string();
+        let response_text = response.text().await?;
+        let raw_document: serde_json::Value = serde_json::from_str(&response_text)?;
+        
+        let doc_id = raw_document.get("name")
+            .and_then(|n| n.as_str())
+            .and_then(|name| name.split('/').last())
+            .unwrap_or("unknown")
+            .to_string();
+        
         Ok(doc_id)
     }
     
@@ -306,8 +333,14 @@ impl FirebaseClient {
             return Err(FirebaseError::DatabaseError(format!("Get failed: {}", error_text)));
         }
         
-        let document: Document = response.json().await?;
-        firestore_fields_to_json(document.fields)
+        let response_text = response.text().await?;
+        let raw_document: serde_json::Value = serde_json::from_str(&response_text)?;
+        
+        if let Some(fields) = raw_document.get("fields") {
+            convert_raw_firestore_fields_to_json(fields)
+        } else {
+            Ok(serde_json::Value::Object(serde_json::Map::new()))
+        }
     }
     
     pub async fn update_document(&self, collection: &str, doc_id: &str, data: serde_json::Value, merge: bool) -> Result<()> {
@@ -403,7 +436,7 @@ fn json_value_to_firestore(value: serde_json::Value) -> Result<FirestoreValue> {
             }
         }
         serde_json::Value::Bool(b) => Ok(FirestoreValue::BooleanValue(b)),
-        serde_json::Value::Null => Ok(FirestoreValue::NullValue),
+        serde_json::Value::Null => Ok(FirestoreValue::NullValue(None)),
         serde_json::Value::Array(arr) => {
             let mut values = Vec::new();
             for item in arr {
@@ -441,7 +474,7 @@ fn firestore_value_to_json(value: FirestoreValue) -> Result<serde_json::Value> {
             Ok(serde_json::Value::Number(serde_json::Number::from_f64(f).unwrap_or(serde_json::Number::from(0))))
         }
         FirestoreValue::BooleanValue(b) => Ok(serde_json::Value::Bool(b)),
-        FirestoreValue::NullValue => Ok(serde_json::Value::Null),
+        FirestoreValue::NullValue(_) => Ok(serde_json::Value::Null),
         FirestoreValue::TimestampValue(ts) => Ok(serde_json::Value::String(ts)),
         FirestoreValue::ArrayValue { values } => {
             let mut json_arr = Vec::new();
@@ -457,5 +490,56 @@ fn firestore_value_to_json(value: FirestoreValue) -> Result<serde_json::Value> {
             }
             Ok(serde_json::Value::Object(json_map))
         }
+    }
+}
+
+// Convert raw Firestore fields (from JSON response) to JSON
+fn convert_raw_firestore_fields_to_json(fields: &serde_json::Value) -> Result<serde_json::Value> {
+    let mut json_map = serde_json::Map::new();
+    
+    if let Some(fields_obj) = fields.as_object() {
+        for (key, value) in fields_obj {
+            json_map.insert(key.clone(), convert_raw_firestore_value_to_json(value)?);
+        }
+    }
+    
+    Ok(serde_json::Value::Object(json_map))
+}
+
+// Convert raw Firestore value to JSON (handles the actual Firestore format)
+fn convert_raw_firestore_value_to_json(value: &serde_json::Value) -> Result<serde_json::Value> {
+    if let Some(string_val) = value.get("stringValue").and_then(|v| v.as_str()) {
+        Ok(serde_json::Value::String(string_val.to_string()))
+    } else if let Some(int_val) = value.get("integerValue").and_then(|v| v.as_str()) {
+        if let Ok(num) = int_val.parse::<i64>() {
+            Ok(serde_json::Value::Number(serde_json::Number::from(num)))
+        } else {
+            Ok(serde_json::Value::String(int_val.to_string()))
+        }
+    } else if let Some(double_val) = value.get("doubleValue").and_then(|v| v.as_f64()) {
+        Ok(serde_json::Value::Number(serde_json::Number::from_f64(double_val).unwrap_or(serde_json::Number::from(0))))
+    } else if let Some(bool_val) = value.get("booleanValue").and_then(|v| v.as_bool()) {
+        Ok(serde_json::Value::Bool(bool_val))
+    } else if let Some(timestamp) = value.get("timestampValue").and_then(|v| v.as_str()) {
+        Ok(serde_json::Value::String(timestamp.to_string()))
+    } else if value.get("arrayValue").is_some() {
+        let json_array = if let Some(array_values) = value.get("arrayValue").and_then(|v| v.get("values")).and_then(|v| v.as_array()) {
+            let mut json_array = Vec::new();
+            for item in array_values {
+                json_array.push(convert_raw_firestore_value_to_json(item)?);
+            }
+            json_array
+        } else {
+            // Empty array case - Firestore might not include "values" field for empty arrays
+            Vec::new()
+        };
+        Ok(serde_json::Value::Array(json_array))
+    } else if let Some(map_fields) = value.get("mapValue").and_then(|v| v.get("fields")) {
+        convert_raw_firestore_fields_to_json(map_fields)
+    } else if value.get("nullValue").is_some() {
+        Ok(serde_json::Value::Null)
+    } else {
+        // Fallback for unknown types
+        Ok(serde_json::Value::Null)
     }
 }
