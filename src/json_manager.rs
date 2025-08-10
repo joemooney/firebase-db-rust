@@ -488,10 +488,15 @@ impl JsonSchemaManager {
     where
         T: for<'de> Deserialize<'de> + ToFirestore,
     {
-        let json_content = fs::read_to_string(input_file)
+        let file_content = fs::read_to_string(input_file)
             .map_err(|e| FirebaseError::ConfigError(format!("Failed to read import file: {}", e)))?;
 
-        let export: DataExport = serde_json::from_str(&json_content)?;
+        let export: DataExport = if input_file.ends_with(".yaml") || input_file.ends_with(".yml") {
+            serde_yaml::from_str(&file_content)
+                .map_err(|e| FirebaseError::ConfigError(format!("Failed to parse YAML import file: {}", e)))?
+        } else {
+            serde_json::from_str(&file_content)?
+        };
         let target_collection = collection_name.unwrap_or(&export.collection);
 
         let mut imported_count = 0;

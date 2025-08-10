@@ -43,7 +43,7 @@ enum SchemaActions {
         #[arg(long)]
         manual: bool,
     },
-    /// Import schema from JSON file
+    /// Import schema from JSON or YAML file
     Import {
         /// Input file path
         #[arg(short, long)]
@@ -90,7 +90,7 @@ enum DataActions {
         /// Document ID (optional, auto-generated if not provided)
         #[arg(short, long)]
         id: Option<String>,
-        /// JSON data for the document (if not provided, opens TUI form)
+        /// JSON or YAML data for the document (if not provided, opens TUI form)
         #[arg(short, long)]
         json: Option<String>,
         /// Use interactive TUI form even if JSON is provided
@@ -120,7 +120,7 @@ enum DataActions {
         /// Document ID
         #[arg(short, long)]
         id: String,
-        /// JSON data for updates (if not provided, opens TUI form)
+        /// JSON or YAML data for updates (if not provided, opens TUI form)
         #[arg(short, long)]
         json: Option<String>,
         /// Use interactive TUI form even if JSON is provided
@@ -151,7 +151,7 @@ enum DataActions {
         #[arg(short, long)]
         output: String,
     },
-    /// Import data from JSON file
+    /// Import data from JSON or YAML file
     Import {
         /// Input file path
         #[arg(short, long)]
@@ -446,9 +446,8 @@ async fn handle_data_command(
                     }
                 }
             } else {
-                let json_data = serde_json::from_str(&json.unwrap())
-                    .map_err(|e| FirebaseError::ValidationError(format!("Invalid JSON: {}", e)))?;
-                add_timestamps_to_document(json_data)
+                let data = parse_json_or_yaml(&json.unwrap())?;
+                add_timestamps_to_document(data)
             };
             
             // Validate against stored schema if available
@@ -513,9 +512,8 @@ async fn handle_data_command(
                     }
                 }
             } else {
-                let json_data = serde_json::from_str(&json.unwrap())
-                    .map_err(|e| FirebaseError::ValidationError(format!("Invalid JSON: {}", e)))?;
-                add_updated_timestamp(json_data)
+                let data = parse_json_or_yaml(&json.unwrap())?;
+                add_updated_timestamp(data)
             };
             
             let merge_mode = !replace;
@@ -947,6 +945,27 @@ fn add_updated_timestamp(mut data: serde_json::Value) -> serde_json::Value {
     data
 }
 
+// Parse JSON or YAML content into serde_json::Value
+fn parse_json_or_yaml(content: &str) -> Result<serde_json::Value, FirebaseError> {
+    // First try JSON
+    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(content) {
+        return Ok(json_value);
+    }
+    
+    // If JSON fails, try YAML
+    match serde_yaml::from_str::<serde_json::Value>(content) {
+        Ok(yaml_value) => Ok(yaml_value),
+        Err(yaml_err) => {
+            // If both fail, return more helpful error
+            let json_err = serde_json::from_str::<serde_json::Value>(content).unwrap_err();
+            Err(FirebaseError::ValidationError(format!(
+                "Failed to parse as JSON: {}. Failed to parse as YAML: {}", 
+                json_err, yaml_err
+            )))
+        }
+    }
+}
+
 // Parse field value with automatic type inference
 fn parse_field_value_with_inference(value_str: &str) -> Result<serde_json::Value, FirebaseError> {
     let trimmed = value_str.trim();
@@ -1187,6 +1206,12 @@ async fn show_collection_help(
     println!("Create with JSON:");
     println!("  cargo run --bin firebase-cli data create -c {} \\", collection_name);
     println!("    -j '{{\"field1\":\"value\",\"field2\":123}}'");
+    println!();
+    
+    println!("Create with YAML:");
+    println!("  cargo run --bin firebase-cli data create -c {} \\", collection_name);
+    println!("    -j 'field1: value");
+    println!("         field2: 123'");
     println!();
     
     println!("Create with interactive TUI form:");
