@@ -79,6 +79,9 @@ enum DataActions {
         /// Use interactive TUI form even if JSON is provided
         #[arg(long)]
         interactive: bool,
+        /// Field values as key=value or key:value pairs (e.g., name="John Doe" age=30 active=true)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        fields: Vec<String>,
     },
     /// Read/get a document by ID
     Read {
@@ -272,8 +275,12 @@ async fn handle_data_command(
     let client = json_manager.get_client();
     
     match action {
-        DataActions::Create { collection, id, json, interactive } => {
-            let data = if interactive || json.is_none() {
+        DataActions::Create { collection, id, json, interactive, fields } => {
+            let data = if !fields.is_empty() {
+                // Parse field arguments
+                println!("📝 Creating document from field arguments...");
+                parse_field_arguments(&fields)?
+            } else if interactive || json.is_none() {
                 // Use TUI form
                 let schema = match collection_manager.describe_collection(&collection, 10).await {
                     Ok(schema) => schema,
@@ -704,4 +711,112 @@ fn count_fields(data: &serde_json::Value) -> usize {
         serde_json::Value::Object(map) => map.len(),
         _ => 0,
     }
+}
+
+// Parse field arguments like "name=John Doe" "age=30" "active=true"
+fn parse_field_arguments(fields: &[String]) -> Result<serde_json::Value, FirebaseError> {
+    let mut map = serde_json::Map::new();
+    
+    for field_arg in fields {
+        // Support both = and : separators
+        let (key, value_str) = if let Some((k, v)) = field_arg.split_once('=') {
+            (k.trim(), v.trim())
+        } else if let Some((k, v)) = field_arg.split_once(':') {
+            (k.trim(), v.trim())
+        } else {
+            return Err(FirebaseError::ValidationError(
+                format!("Invalid field format '{}'. Use 'key=value' or 'key:value'", field_arg)
+            ));
+        };
+        
+        if key.is_empty() {
+            return Err(FirebaseError::ValidationError(
+                format!("Empty field name in '{}'", field_arg)
+            ));
+        }
+        
+        // Parse value with type inference
+        let value = parse_field_value_with_inference(value_str)?;
+        map.insert(key.to_string(), value);
+    }
+    
+    if map.is_empty() {
+        return Err(FirebaseError::ValidationError(
+            "No valid fields provided".to_string()
+        ));
+    }
+    
+    Ok(serde_json::Value::Object(map))
+}
+
+// Parse field value with automatic type inference
+fn parse_field_value_with_inference(value_str: &str) -> Result<serde_json::Value, FirebaseError> {
+    let trimmed = value_str.trim();
+    
+    // Handle empty values
+    if trimmed.is_empty() {
+        return Ok(serde_json::Value::String(String::new()));
+    }
+    
+    // Handle null values
+    if trimmed.eq_ignore_ascii_case("null") || trimmed.eq_ignore_ascii_case("none") {
+        return Ok(serde_json::Value::Null);
+    }
+    
+    // Handle boolean values
+    if trimmed.eq_ignore_ascii_case("true") || trimmed.eq_ignore_ascii_case("yes") {
+        return Ok(serde_json::Value::Bool(true));
+    }
+    if trimmed.eq_ignore_ascii_case("false") || trimmed.eq_ignore_ascii_case("no") {
+        return Ok(serde_json::Value::Bool(false));
+    }
+    
+    // Handle JSON arrays and objects
+    if (trimmed.starts_with('[') && trimmed.ends_with(']')) || 
+       (trimmed.starts_with('{') && trimmed.ends_with('}')) {
+        return serde_json::from_str(trimmed)
+            .map_err(|e| FirebaseError::ValidationError(
+                format!("Invalid JSON in '{}': {}", trimmed, e)
+            ));
+    }
+    
+    // Handle quoted strings (remove quotes)
+    if (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2) ||
+       (trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() >= 2) {
+        let unquoted = &trimmed[1..trimmed.len()-1];
+        return Ok(serde_json::Value::String(unquoted.to_string()));
+    }
+    
+    // Try to parse as number
+    if let Ok(int_val) = trimmed.parse::<i64>() {
+        return Ok(serde_json::Value::Number(serde_json::Number::from(int_val)));
+    }
+    
+    if let Ok(float_val) = trimmed.parse::<f64>() {
+        if let Some(num) = serde_json::Number::from_f64(float_val) {
+            return Ok(serde_json::Value::Number(num));
+        }
+    }
+    
+    // Handle timestamp patterns (ISO 8601-like)
+    if trimmed.len() >= 19 && 
+       (trimmed.contains('T') || trimmed.contains(' ')) &&
+       (trimmed.contains('-') || trimmed.contains(':')) {
+        // Try parsing as timestamp
+        if let Ok(_) = chrono::DateTime::parse_from_rfc3339(trimmed) {
+            return Ok(serde_json::Value::String(trimmed.to_string()));
+        }
+        // Try other common timestamp formats
+        if let Ok(_) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S") {
+            return Ok(serde_json::Value::String(trimmed.to_string()));
+        }
+    }
+    
+    // Handle "now" as current timestamp
+    if trimmed.eq_ignore_ascii_case("now") {
+        return Ok(serde_json::Value::String(chrono::Utc::now().to_rfc3339()));
+    }
+    
+    // Default to string
+    Ok(serde_json::Value::String(trimmed.to_string()))
 }

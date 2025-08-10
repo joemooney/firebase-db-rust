@@ -44,6 +44,43 @@ cargo run --bin firebase-cli data create -c users -j '{
 }'
 ```
 
+#### Field Arguments (NEW!)
+```bash
+# Quick creation with field arguments (automatic type detection)
+cargo run --bin firebase-cli data create -c users name="John Doe" age=30 active=true
+
+# Mixed separators (= and :) work
+cargo run --bin firebase-cli data create -c users name="Alice" department:Engineering salary=75000
+
+# Complex data types supported
+cargo run --bin firebase-cli data create -c users \
+  name="Bob Smith" \
+  skills='["rust","firebase","cli"]' \
+  metadata='{"role":"admin","level":5}' \
+  created_at=now
+
+# With specific document ID
+cargo run --bin firebase-cli data create -c users -i user_123 name="Charlie" age=25
+```
+
+**Field Argument Features:**
+- 🧠 **Smart Type Detection**: Automatically detects strings, numbers, booleans, JSON, timestamps
+- ⚡ **Two Separators**: Use `key=value` or `key:value` (both work, mix freely)
+- 📦 **Complex Data**: JSON arrays `'["a","b"]'` and objects `'{"key":"value"}'`
+- ⏰ **Timestamps**: Use `created_at=now` for current time or ISO 8601 formats
+- 🔤 **Quoted Strings**: Handle spaces with `name="John Doe"` or `name='Jane Smith'`
+- 💯 **Shell Friendly**: Perfect for automation and scripting
+
+**Type Inference Examples:**
+- `age=30` → integer
+- `salary=75000.50` → number  
+- `active=true` → boolean
+- `name="John Doe"` → string
+- `tags='["a","b"]'` → array
+- `data='{"key":"value"}'` → object
+- `created_at=now` → current timestamp
+- `optional=null` → null value
+
 #### Interactive TUI Form
 ```bash
 # Opens intelligent form based on collection schema
@@ -231,10 +268,28 @@ Comprehensive error handling with helpful messages:
 ### With Shell Scripts
 ```bash
 #!/bin/bash
-# Batch create users
+# Batch create users with field arguments (much cleaner!)
+for user in alice bob charlie; do
+    cargo run --bin firebase-cli data create -c users \
+        name="$user" \
+        email="${user}@company.com" \
+        status=new \
+        created_at=now
+done
+
+# Or with JSON (more verbose)
 for user in alice bob charlie; do
     cargo run --bin firebase-cli data create -c users -j "{\"name\":\"$user\",\"status\":\"new\"}"
 done
+
+# Create test data with field arguments
+cargo run --bin firebase-cli data create -c products \
+    name="Widget Pro" \
+    price=29.99 \
+    category:electronics \
+    in_stock=true \
+    features='["waterproof","wireless","durable"]' \
+    specs='{"weight":"1.2kg","dimensions":"10x5x3cm"}'
 ```
 
 ### With Data Processing
@@ -260,12 +315,35 @@ cargo run --bin firebase-cli data import -i processed_users.json -c users
 - For programmatic data creation
 - When you know the exact data structure
 
-### 3. Choose the Right Output Format
+### 3. Choose the Right Input Method
+
+**Field Arguments** - Best for:
+- ✅ Quick document creation during development
+- ✅ Shell scripts and automation  
+- ✅ Simple to moderate data complexity
+- ✅ When you want fast, intuitive syntax
+- ❌ Avoid for deeply nested structures
+
+**TUI Forms** - Best for:
+- ✅ Complex documents with many fields
+- ✅ When you need schema discovery and validation  
+- ✅ Interactive data exploration
+- ✅ User-friendly data entry
+- ❌ Not suitable for automation
+
+**JSON Input** - Best for:
+- ✅ Complex nested structures
+- ✅ Precise data type control
+- ✅ Programmatically generated data
+- ✅ When data comes from other systems
+- ❌ More verbose for simple cases
+
+### 4. Choose the Right Output Format
 - **Table**: Great for browsing and comparing documents
 - **JSON**: Perfect for processing and automation  
 - **YAML**: Ideal for human reading and debugging
 
-### 4. Schema Discovery Workflow
+### 5. Schema Discovery Workflow
 ```bash
 # 1. Analyze collection to understand structure
 cargo run --bin firebase-cli collections describe -c users
