@@ -490,6 +490,7 @@ fn firestore_value_to_json(value: FirestoreValue) -> Result<serde_json::Value> {
             }
             Ok(serde_json::Value::Object(json_map))
         }
+        FirestoreValue::Unknown => Ok(serde_json::Value::String("(unknown)".to_string())),
     }
 }
 

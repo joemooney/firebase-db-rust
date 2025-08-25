@@ -43,14 +43,18 @@ pub enum FirestoreValue {
     BooleanValue(bool),
     TimestampValue(String),
     MapValue { 
+        #[serde(default)]
         fields: HashMap<String, FirestoreValue> 
     },
-    #[serde(with = "array_value_serde")]
     ArrayValue { 
+        #[serde(default)]
         values: Vec<FirestoreValue> 
     },
     #[serde(rename = "nullValue")]
     NullValue(Option<()>),
+    // Handle cases where Firestore returns different field names
+    #[serde(other)]
+    Unknown,
 }
 
 mod array_value_serde {

@@ -706,7 +706,19 @@ async fn list_collection_documents(
         fields: std::collections::HashMap<String, FirestoreValue>,
     }
     
-    let list_response: ListResponse = response.json().await?;
+    // Get the raw text first to debug JSON structure
+    let response_text = response.text().await?;
+    
+    // Try to parse the JSON and provide better error messages
+    let list_response: ListResponse = match serde_json::from_str(&response_text) {
+        Ok(response) => response,
+        Err(e) => {
+            eprintln!("JSON parsing error: {}", e);
+            eprintln!("Response JSON (first 1000 chars):");
+            eprintln!("{}", &response_text[..response_text.len().min(1000)]);
+            return Err(FirebaseError::DatabaseError(format!("JSON parsing failed: {}", e)));
+        }
+    };
     let mut results = Vec::new();
     
     if let Some(documents) = list_response.documents {
@@ -746,7 +758,21 @@ fn firestore_value_to_json_value(value: &FirestoreValue) -> Result<serde_json::V
         FirestoreValue::BooleanValue(b) => Ok(serde_json::Value::Bool(*b)),
         FirestoreValue::NullValue(_) => Ok(serde_json::Value::Null),
         FirestoreValue::TimestampValue(ts) => Ok(serde_json::Value::String(ts.clone())),
-        _ => Ok(serde_json::Value::String("(complex value)".to_string())),
+        FirestoreValue::ArrayValue { values } => {
+            let mut json_array = Vec::new();
+            for val in values {
+                json_array.push(firestore_value_to_json_value(val)?);
+            }
+            Ok(serde_json::Value::Array(json_array))
+        }
+        FirestoreValue::MapValue { fields } => {
+            let mut json_map = serde_json::Map::new();
+            for (key, val) in fields {
+                json_map.insert(key.clone(), firestore_value_to_json_value(val)?);
+            }
+            Ok(serde_json::Value::Object(json_map))
+        }
+        FirestoreValue::Unknown => Ok(serde_json::Value::String("(unknown value type)".to_string())),
     }
 }
 
