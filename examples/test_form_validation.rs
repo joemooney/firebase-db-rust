@@ -6,41 +6,41 @@ fn main() {
     // Create a test form
     let mut form = TuiForm::new("Test User Creation".to_string());
     
-    // Add fields with different types
+    // Add fields with different types - now starting empty with examples
     form.add_field(FormField {
         name: "user_id".to_string(),
         field_type: "string".to_string(),
-        value: "user123".to_string(),
+        value: "user123".to_string(), // Adding value for testing
         required: true,
-        description: Some("User ID".to_string()),
-        default_value: None,
+        description: Some("example: \"David Wilson\"".to_string()),
+        default_value: Some(String::new()),
     });
     
     form.add_field(FormField {
         name: "age".to_string(),
         field_type: "integer".to_string(),
-        value: "25".to_string(),
+        value: "25".to_string(), // Adding value for testing
         required: true,
-        description: Some("User's age".to_string()),
-        default_value: None,
+        description: Some("example: 42".to_string()),
+        default_value: Some(String::new()),
     });
     
     form.add_field(FormField {
         name: "balance".to_string(),
         field_type: "number".to_string(),
-        value: "1234.56".to_string(),
+        value: "1234.56".to_string(), // Adding value for testing
         required: false,
-        description: Some("Account balance".to_string()),
-        default_value: None,
+        description: Some("example: 3.14".to_string()),
+        default_value: Some(String::new()),
     });
     
     form.add_field(FormField {
-        name: "is_active".to_string(),
-        field_type: "boolean".to_string(),
-        value: "true".to_string(),
+        name: "tags".to_string(),
+        field_type: "array".to_string(),
+        value: "[]".to_string(), // Empty array by default
         required: false,
-        description: Some("Account status".to_string()),
-        default_value: None,
+        description: Some("example: [\"premium\", \"verified\"]".to_string()),
+        default_value: Some("[]".to_string()),
     });
     
     // Test valid form submission
@@ -67,15 +67,22 @@ fn main() {
         Err(e) => println!("✅ Correctly caught error: {}\n", e),
     }
     
-    // Test boolean variations
-    println!("Test: Boolean field variations");
+    // Test empty array field (should work)
+    println!("Test: Empty array field");
     form.fields[0].value = "user123".to_string(); // Fix required field
-    for val in ["true", "false", "yes", "no", "1", "0", "invalid"] {
-        form.fields[3].value = val.to_string();
-        match form.to_json() {
-            Ok(_) => println!("   '{}' - Valid ✓", val),
-            Err(_) => println!("   '{}' - Invalid ✗", val),
-        }
+    form.fields[1].value = "25".to_string(); // Fix age field
+    form.fields[3].value = "[]".to_string(); // Empty array
+    match form.to_json() {
+        Ok(json) => println!("✅ Empty array works: {:?}", json.get("tags")),
+        Err(e) => println!("❌ Empty array failed: {}", e),
+    }
+    
+    // Test array with values
+    println!("Test: Array with values");
+    form.fields[3].value = "[\"premium\", \"verified\"]".to_string();
+    match form.to_json() {
+        Ok(json) => println!("✅ Array with values works: {:?}", json.get("tags")),
+        Err(e) => println!("❌ Array with values failed: {}", e),
     }
     
     println!("\n✨ Form validation testing complete!");
@@ -92,6 +99,8 @@ fn main() {
     println!("• Required fields marked with *");
     println!("• String fields don't need quotes - just type the text");
     println!("• Array fields default to empty [] instead of sample data");
+    println!("• Examples shown in field labels (e.g., 'name * (string) | example: \"David Wilson\"')");
+    println!("• Fields start empty by default, not pre-filled with sample data");
     println!("• Help bar always visible at bottom");
     println!("• Error messages with examples of valid input");
 }

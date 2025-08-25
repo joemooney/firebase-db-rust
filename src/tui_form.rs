@@ -60,21 +60,37 @@ impl TuiForm {
         let mut form = Self::new(format!("Create Document in '{}'", collection_name));
         
         for field in &schema.fields {
-            // Set empty arrays by default, use sample for other types
-            let default_value = if field.field_type == "array" {
+            // Start with empty values by default
+            let empty_value = if field.field_type == "array" {
                 "[]".to_string()
             } else {
-                field.sample_values.first().map(|v| v.clone()).unwrap_or_default()
+                String::new()
+            };
+            
+            // Create example text from sample values
+            let example_text = if !field.sample_values.is_empty() {
+                let example = field.sample_values.first().unwrap();
+                format!("example: {}", example)
+            } else {
+                match field.field_type.as_str() {
+                    "string" => "example: \"John Doe\"".to_string(),
+                    "integer" => "example: 42".to_string(),
+                    "number" => "example: 3.14".to_string(),
+                    "boolean" => "example: true".to_string(),
+                    "array" => "example: [\"item1\", \"item2\"]".to_string(),
+                    "object" => "example: {\"key\": \"value\"}".to_string(),
+                    "timestamp" => "example: 2024-01-01T12:00:00Z or 'now'".to_string(),
+                    _ => "example: value".to_string(),
+                }
             };
             
             form.fields.push(FormField {
                 name: field.name.clone(),
                 field_type: field.field_type.clone(),
-                value: default_value.clone(),
+                value: empty_value.clone(),
                 required: field.is_required,
-                description: Some(format!("{} values, {} unique, frequency: {}", 
-                    field.sample_values.len(), field.unique_values, field.frequency)),
-                default_value: Some(default_value),
+                description: Some(example_text),
+                default_value: Some(empty_value),
             });
         }
         
@@ -85,8 +101,8 @@ impl TuiForm {
                 field_type: "string".to_string(),
                 value: String::new(),
                 required: false,
-                description: Some("Document field".to_string()),
-                default_value: None,
+                description: Some("example: \"John Doe\"".to_string()),
+                default_value: Some(String::new()),
             });
         }
         
@@ -103,7 +119,10 @@ impl TuiForm {
                     field_type: infer_field_type(value),
                     value: format_value_for_editing(value),
                     required: false,
-                    description: Some(format!("Current: {}", format_value_display(value))),
+                    description: Some(format!("current: {} | example: {}", 
+                        format_value_display(value),
+                        get_example_for_type(&infer_field_type(value))
+                    )),
                     default_value: Some(format_value_for_editing(value)),
                 });
             }
@@ -543,10 +562,18 @@ impl TuiForm {
                 Style::default().fg(Color::White)
             };
             
-            form_lines.push(Line::from(vec![
+            // Create field label with example
+            let mut label_spans = vec![
                 Span::styled(format!("{:<20}", field_name), label_style),
                 Span::styled(format!(" ({})", field.field_type), Style::default().fg(Color::DarkGray)),
-            ]));
+            ];
+            
+            // Add example text if available
+            if let Some(desc) = &field.description {
+                label_spans.push(Span::styled(format!(" | {}", desc), Style::default().fg(Color::DarkGray)));
+            }
+            
+            form_lines.push(Line::from(label_spans));
             
             // Field value line with proper cursor
             let value_style = if is_current && editing_field {
@@ -657,6 +684,19 @@ impl TuiForm {
                 .block(Block::default().borders(Borders::TOP));
             f.render_widget(help, chunks[help_index]);
         }
+    }
+}
+
+fn get_example_for_type(field_type: &str) -> String {
+    match field_type {
+        "string" => "\"John Doe\"".to_string(),
+        "integer" => "42".to_string(),
+        "number" => "3.14".to_string(),
+        "boolean" => "true".to_string(),
+        "array" => "[\"item1\", \"item2\"]".to_string(),
+        "object" => "{\"key\": \"value\"}".to_string(),
+        "timestamp" => "2024-01-01T12:00:00Z or 'now'".to_string(),
+        _ => "value".to_string(),
     }
 }
 
