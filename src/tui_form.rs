@@ -13,7 +13,7 @@ use ratatui::{
     Frame, Terminal,
 };
 use serde_json::{Map, Value};
-use crate::collections::CollectionSchema;
+use crate::collections::{CollectionSchema, AutoFieldType};
 use crate::error::FirebaseError;
 
 #[derive(Debug, Clone)]
@@ -24,6 +24,7 @@ pub struct FormField {
     pub required: bool,
     pub description: Option<String>,
     pub default_value: Option<String>,
+    pub auto_field: Option<AutoFieldType>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +38,7 @@ pub struct TuiForm {
     cursor_position: usize,  // Track cursor position within the current field
     button_selected: bool,  // Track if a button is selected
     selected_button: usize,  // 0 = Add/Submit, 1 = Cancel
+    schema: Option<CollectionSchema>,  // Store schema for automatic field generation
 }
 
 impl TuiForm {
@@ -53,13 +55,20 @@ impl TuiForm {
             cursor_position: 0,
             button_selected: false,
             selected_button: 0,
+            schema: None,
         }
     }
 
     pub fn from_schema(collection_name: &str, schema: &CollectionSchema) -> Self {
         let mut form = Self::new(format!("Create Document in '{}'", collection_name));
+        form.schema = Some(schema.clone());
         
         for field in &schema.fields {
+            // Skip automatic fields - they will be generated automatically
+            if field.auto_field.is_some() {
+                continue;
+            }
+            
             // Start with empty values by default
             let empty_value = if field.field_type == "array" {
                 "[]".to_string()
@@ -91,6 +100,7 @@ impl TuiForm {
                 required: field.is_required,
                 description: Some(example_text),
                 default_value: Some(empty_value),
+                auto_field: None,
             });
         }
         
@@ -103,6 +113,7 @@ impl TuiForm {
                 required: false,
                 description: Some("example: \"John Doe\"".to_string()),
                 default_value: Some(String::new()),
+                auto_field: None,
             });
         }
         
@@ -124,6 +135,7 @@ impl TuiForm {
                         get_example_for_type(&infer_field_type(value))
                     )),
                     default_value: Some(format_value_for_editing(value)),
+                    auto_field: None,
                 });
             }
         }
@@ -138,6 +150,7 @@ impl TuiForm {
     pub fn to_json(&self) -> Result<Value, FirebaseError> {
         let mut map = Map::new();
         
+        // Add user-entered field values
         for field in &self.fields {
             if !field.value.trim().is_empty() {
                 let parsed_value = parse_field_value(&field.value, &field.field_type)?;
@@ -146,6 +159,16 @@ impl TuiForm {
                 return Err(FirebaseError::ValidationError(
                     format!("Required field '{}' cannot be empty", field.name)
                 ));
+            }
+        }
+        
+        // Add automatic field values from schema
+        if let Some(schema) = &self.schema {
+            for field in &schema.fields {
+                if let Some(auto_type) = &field.auto_field {
+                    let auto_value = auto_type.generate_value();
+                    map.insert(field.name.clone(), auto_value);
+                }
             }
         }
         

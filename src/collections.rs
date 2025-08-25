@@ -12,6 +12,17 @@ pub struct CollectionInfo {
     pub last_modified: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum AutoFieldType {
+    CurrentTimestamp,    // ISO 8601 timestamp of current time
+    CreatedAt,          // Alias for CurrentTimestamp
+    UpdatedAt,          // Timestamp updated on each modification
+    SequenceNumber,     // Auto-incrementing integer
+    RandomUuid,         // Random UUID v4
+    RandomNumber,       // Random integer in range
+    UserId,             // Current user ID (if available)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FieldInfo {
     pub name: String,
@@ -20,6 +31,7 @@ pub struct FieldInfo {
     pub sample_values: Vec<String>,
     pub frequency: usize,
     pub unique_values: usize,
+    pub auto_field: Option<AutoFieldType>,  // New field for automatic generation
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -252,6 +264,16 @@ impl CollectionManager {
             let is_required = stats.frequency == total_docs;
             let sample_values: Vec<String> = stats.sample_values.into_iter().collect();
 
+            // Detect automatic fields based on name patterns and values
+            let auto_field = detect_auto_field(&name, &field_type, &sample_values);
+            
+            // Override field type for automatic timestamp fields
+            let field_type = if matches!(auto_field, Some(AutoFieldType::CreatedAt) | Some(AutoFieldType::UpdatedAt) | Some(AutoFieldType::CurrentTimestamp)) {
+                "timestamp".to_string()
+            } else {
+                field_type
+            };
+
             FieldInfo {
                 name,
                 field_type,
@@ -259,6 +281,7 @@ impl CollectionManager {
                 frequency: stats.frequency,
                 unique_values: sample_values.len(),
                 sample_values,
+                auto_field,
             }
         }).collect();
 
@@ -389,10 +412,17 @@ impl CollectionManager {
             output.push_str(&format!("Collection: {} ({} documents)\n\n", schema.collection_name, schema.total_documents));
             output.push_str("Fields:\n");
             for field in &schema.fields {
-                output.push_str(&format!("  {} ({}){} - {} occurrences\n", 
+                let auto_info = if let Some(auto_type) = &field.auto_field {
+                    format!(" [AUTO: {}]", auto_type.description())
+                } else {
+                    String::new()
+                };
+                
+                output.push_str(&format!("  {} ({}){}{} - {} occurrences\n", 
                     field.name,
                     field.field_type,
                     if field.is_required { " *required" } else { "" },
+                    auto_info,
                     field.frequency
                 ));
                 if !field.sample_values.is_empty() {
@@ -461,6 +491,108 @@ impl FieldStats {
             frequency: 0,
             field_types: HashSet::new(),
             sample_values: HashSet::new(),
+        }
+    }
+}
+
+fn detect_auto_field(field_name: &str, field_type: &str, sample_values: &[String]) -> Option<AutoFieldType> {
+    let name_lower = field_name.to_lowercase();
+    
+    // Pattern-based detection for common automatic fields
+    if name_lower == "created_at" || name_lower == "createdat" {
+        return Some(AutoFieldType::CreatedAt);
+    }
+    
+    if name_lower == "updated_at" || name_lower == "updatedat" || name_lower == "modified_at" {
+        return Some(AutoFieldType::UpdatedAt);
+    }
+    
+    if name_lower.contains("timestamp") || name_lower == "ts" {
+        return Some(AutoFieldType::CurrentTimestamp);
+    }
+    
+    if name_lower == "id" || name_lower.ends_with("_id") {
+        // Check if values look like UUIDs
+        if sample_values.iter().any(|v| is_uuid_like(v)) {
+            return Some(AutoFieldType::RandomUuid);
+        }
+        // Check if values look like sequential numbers
+        if field_type == "integer" && sample_values.iter().all(|v| v.parse::<i64>().is_ok()) {
+            return Some(AutoFieldType::SequenceNumber);
+        }
+    }
+    
+    if name_lower == "user_id" || name_lower == "userid" || name_lower == "owner_id" {
+        return Some(AutoFieldType::UserId);
+    }
+    
+    // Check for timestamp patterns in values
+    if sample_values.iter().any(|v| is_iso8601_timestamp(v)) {
+        if name_lower.contains("created") {
+            return Some(AutoFieldType::CreatedAt);
+        } else if name_lower.contains("updated") || name_lower.contains("modified") {
+            return Some(AutoFieldType::UpdatedAt);
+        } else {
+            return Some(AutoFieldType::CurrentTimestamp);
+        }
+    }
+    
+    None
+}
+
+fn is_uuid_like(value: &str) -> bool {
+    // Simple UUID pattern check: 8-4-4-4-12 hex characters
+    let parts: Vec<&str> = value.split('-').collect();
+    parts.len() == 5 
+        && parts[0].len() == 8 
+        && parts[1].len() == 4 
+        && parts[2].len() == 4 
+        && parts[3].len() == 4 
+        && parts[4].len() == 12
+        && parts.iter().all(|part| part.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+fn is_iso8601_timestamp(value: &str) -> bool {
+    // Check for ISO 8601 timestamp patterns
+    value.contains('T') && (value.ends_with('Z') || value.contains('+') || value.contains('-'))
+        && value.len() >= 19 // Minimum length for YYYY-MM-DDTHH:MM:SS
+}
+
+impl AutoFieldType {
+    pub fn generate_value(&self) -> serde_json::Value {
+        match self {
+            AutoFieldType::CurrentTimestamp | AutoFieldType::CreatedAt => {
+                serde_json::Value::String(chrono::Utc::now().to_rfc3339())
+            }
+            AutoFieldType::UpdatedAt => {
+                serde_json::Value::String(chrono::Utc::now().to_rfc3339())
+            }
+            AutoFieldType::SequenceNumber => {
+                // This would need to be managed globally in a real implementation
+                serde_json::Value::Number((chrono::Utc::now().timestamp_millis() % 1000000).into())
+            }
+            AutoFieldType::RandomUuid => {
+                serde_json::Value::String(format!("{}", uuid::Uuid::new_v4()))
+            }
+            AutoFieldType::RandomNumber => {
+                serde_json::Value::Number((rand::random::<u32>() % 1000000).into())
+            }
+            AutoFieldType::UserId => {
+                // In a real implementation, this would get the current user
+                serde_json::Value::String("system-user".to_string())
+            }
+        }
+    }
+    
+    pub fn description(&self) -> &'static str {
+        match self {
+            AutoFieldType::CurrentTimestamp => "Current timestamp (ISO 8601)",
+            AutoFieldType::CreatedAt => "Creation timestamp (ISO 8601)",
+            AutoFieldType::UpdatedAt => "Last update timestamp (ISO 8601)", 
+            AutoFieldType::SequenceNumber => "Auto-incrementing sequence number",
+            AutoFieldType::RandomUuid => "Random UUID v4",
+            AutoFieldType::RandomNumber => "Random number",
+            AutoFieldType::UserId => "Current user ID",
         }
     }
 }
