@@ -82,8 +82,12 @@ fn main() {
     println!("\nThe new compact form features:");
     println!("• All fields visible in single view");
     println!("• Real-time validation with helpful error messages");
-    println!("• Tab/Shift+Tab navigation between fields");
-    println!("• Visual indicators for current field (→ arrow)");
+    println!("• Tab/Shift+Tab/↑/↓ navigation between fields");
+    println!("• ← → arrow keys to move cursor within field");
+    println!("• Home/End keys to jump to start/end of field");
+    println!("• Visual cursor (│) shows exact edit position");
+    println!("• Ctrl+S to SUBMIT form (clearly indicated)");
+    println!("• Ctrl+C or Esc to CANCEL");
     println!("• Required fields marked with *");
     println!("• Type hints for each field");
     println!("• Error messages with examples of valid input");

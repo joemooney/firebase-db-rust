@@ -34,6 +34,7 @@ pub struct TuiForm {
     pub help_text: Vec<String>,
     pub error_message: Option<String>,
     pub compact_mode: bool,
+    cursor_position: usize,  // Track cursor position within the current field
 }
 
 impl TuiForm {
@@ -43,10 +44,11 @@ impl TuiForm {
             current_field: 0,
             title,
             help_text: vec![
-                "Tab/↓ - Next | Shift+Tab/↑ - Previous | Ctrl+S - Save | Esc - Cancel".to_string(),
+                "Tab/↓ - Next field | ↑ - Previous | ← → - Move cursor | Ctrl+S - SUBMIT FORM | Ctrl+C/Esc - CANCEL".to_string(),
             ],
             error_message: None,
             compact_mode: true,
+            cursor_position: 0,
         }
     }
 
@@ -222,9 +224,10 @@ impl TuiForm {
         } else {
             String::new()
         };
+        self.cursor_position = edit_buffer.len();  // Start cursor at end of default value
 
         loop {
-            terminal.draw(|f| self.ui(f, editing_field, &edit_buffer))
+            terminal.draw(|f| self.ui(f, editing_field, &edit_buffer, self.cursor_position))
                 .map_err(|e| FirebaseError::ConfigError(format!("Terminal draw failed: {}", e)))?;
 
             if let Event::Key(key) = event::read()
@@ -243,6 +246,7 @@ impl TuiForm {
                                         // Move to next field
                                         self.current_field = (self.current_field + 1) % self.fields.len().max(1);
                                         edit_buffer = self.fields[self.current_field].value.clone();
+                                        self.cursor_position = edit_buffer.len();
                                     }
                                 }
                             }
@@ -258,6 +262,7 @@ impl TuiForm {
                                     self.current_field = self.fields.len().saturating_sub(1);
                                 }
                                 edit_buffer = self.fields[self.current_field].value.clone();
+                                self.cursor_position = edit_buffer.len();
                             }
                             KeyCode::Up => {
                                 // Save current field and move up
@@ -268,6 +273,7 @@ impl TuiForm {
                                 if self.current_field > 0 {
                                     self.current_field -= 1;
                                     edit_buffer = self.fields[self.current_field].value.clone();
+                                    self.cursor_position = edit_buffer.len();
                                 }
                             }
                             KeyCode::Down | KeyCode::Enter => {
@@ -280,11 +286,31 @@ impl TuiForm {
                                         if self.current_field < self.fields.len().saturating_sub(1) {
                                             self.current_field += 1;
                                             edit_buffer = self.fields[self.current_field].value.clone();
+                                            self.cursor_position = edit_buffer.len();
                                         }
                                     }
                                 }
                             }
+                            KeyCode::Left => {
+                                if self.cursor_position > 0 {
+                                    self.cursor_position -= 1;
+                                }
+                            }
+                            KeyCode::Right => {
+                                if self.cursor_position < edit_buffer.len() {
+                                    self.cursor_position += 1;
+                                }
+                            }
+                            KeyCode::Home => {
+                                self.cursor_position = 0;
+                            }
+                            KeyCode::End => {
+                                self.cursor_position = edit_buffer.len();
+                            }
                             KeyCode::Esc => {
+                                return Ok(None); // Cancel
+                            }
+                            KeyCode::Char('c') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
                                 return Ok(None); // Cancel
                             }
                             KeyCode::Char('s') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
@@ -304,12 +330,22 @@ impl TuiForm {
                                 }
                             }
                             KeyCode::Char(c) => {
-                                edit_buffer.push(c);
+                                edit_buffer.insert(self.cursor_position, c);
+                                self.cursor_position += 1;
                                 self.error_message = None; // Clear error on typing
                             }
                             KeyCode::Backspace => {
-                                edit_buffer.pop();
-                                self.error_message = None; // Clear error on typing
+                                if self.cursor_position > 0 && !edit_buffer.is_empty() {
+                                    self.cursor_position -= 1;
+                                    edit_buffer.remove(self.cursor_position);
+                                    self.error_message = None; // Clear error on typing
+                                }
+                            }
+                            KeyCode::Delete => {
+                                if self.cursor_position < edit_buffer.len() {
+                                    edit_buffer.remove(self.cursor_position);
+                                    self.error_message = None; // Clear error on typing
+                                }
                             }
                             _ => {}
                         }
@@ -325,7 +361,7 @@ impl TuiForm {
         }
     }
 
-    fn ui(&self, f: &mut Frame, editing_field: bool, edit_buffer: &str) {
+    fn ui(&self, f: &mut Frame, editing_field: bool, edit_buffer: &str, cursor_pos: usize) {
         // Calculate heights based on content
         let error_height = if self.error_message.is_some() { 3 } else { 0 };
         let form_height = (self.fields.len() as u16 * 2) + 2; // 2 lines per field + borders
@@ -384,7 +420,7 @@ impl TuiForm {
                 Span::styled(format!(" ({})", field.field_type), Style::default().fg(Color::DarkGray)),
             ]));
             
-            // Field value line
+            // Field value line with proper cursor
             let value_style = if is_current && editing_field {
                 Style::default().fg(Color::Cyan)
             } else if is_current {
@@ -394,15 +430,32 @@ impl TuiForm {
             };
             
             let value_prefix = if is_current { "→ " } else { "  " };
-            form_lines.push(Line::from(vec![
-                Span::raw(value_prefix),
-                Span::styled(display_value, value_style),
-                if is_current && editing_field {
-                    Span::styled("_", Style::default().fg(Color::Cyan).add_modifier(Modifier::RAPID_BLINK))
-                } else {
-                    Span::raw("")
-                },
-            ]));
+            
+            // Build the value line with cursor at the right position
+            if is_current && editing_field {
+                let mut value_spans = vec![Span::raw(value_prefix)];
+                
+                // Split the text at cursor position
+                let (before_cursor, after_cursor) = display_value.split_at(cursor_pos.min(display_value.len()));
+                
+                if !before_cursor.is_empty() {
+                    value_spans.push(Span::styled(before_cursor, value_style));
+                }
+                
+                // Add cursor
+                value_spans.push(Span::styled("│", Style::default().fg(Color::Cyan).add_modifier(Modifier::RAPID_BLINK)));
+                
+                if !after_cursor.is_empty() {
+                    value_spans.push(Span::styled(after_cursor, value_style));
+                }
+                
+                form_lines.push(Line::from(value_spans));
+            } else {
+                form_lines.push(Line::from(vec![
+                    Span::raw(value_prefix),
+                    Span::styled(display_value, value_style),
+                ]));
+            }
         }
         
         let form_block = Paragraph::new(form_lines)
@@ -420,11 +473,24 @@ impl TuiForm {
             f.render_widget(error_widget, chunks[2]);
         }
         
-        // Compact help bar
+        // Compact help bar with clearer instructions
         let help_index = if self.error_message.is_some() { 3 } else { 2 };
         if help_index < chunks.len() {
-            let help = Paragraph::new(Text::from(self.help_text[0].clone()))
-                .style(Style::default().fg(Color::DarkGray))
+            let help = Paragraph::new(Text::from(vec![
+                Line::from(vec![
+                    Span::styled("Navigation: ", Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD)),
+                    Span::styled("Tab/↓", Style::default().fg(Color::Cyan)),
+                    Span::styled(" Next | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("↑/Shift+Tab", Style::default().fg(Color::Cyan)),
+                    Span::styled(" Previous | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("←→", Style::default().fg(Color::Cyan)),
+                    Span::styled(" Move cursor | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Ctrl+S", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                    Span::styled(" SUBMIT | ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Ctrl+C/Esc", Style::default().fg(Color::Red)),
+                    Span::styled(" CANCEL", Style::default().fg(Color::DarkGray)),
+                ])
+            ]))
                 .block(Block::default().borders(Borders::TOP));
             f.render_widget(help, chunks[help_index]);
         }
