@@ -81,14 +81,17 @@ fn main() {
     println!("\n✨ Form validation testing complete!");
     println!("\nThe new compact form features:");
     println!("• All fields visible in single view");
+    println!("• Visual ADD and CANCEL buttons");
     println!("• Real-time validation with helpful error messages");
-    println!("• Tab/Shift+Tab/↑/↓ navigation between fields");
-    println!("• ← → arrow keys to move cursor within field");
+    println!("• Tab/Shift+Tab/↑/↓ navigation between fields and buttons");
+    println!("• ← → arrow keys to move cursor within field or between buttons");
     println!("• Home/End keys to jump to start/end of field");
     println!("• Visual cursor (│) shows exact edit position");
-    println!("• Ctrl+S to SUBMIT form (clearly indicated)");
-    println!("• Ctrl+C or Esc to CANCEL");
+    println!("• Enter on ADD button submits, Enter on CANCEL cancels");
+    println!("• Ctrl+S to SUBMIT form, Ctrl+C/Esc to CANCEL (shortcuts)");
     println!("• Required fields marked with *");
-    println!("• Type hints for each field");
+    println!("• String fields don't need quotes - just type the text");
+    println!("• Array fields default to empty [] instead of sample data");
+    println!("• Help bar always visible at bottom");
     println!("• Error messages with examples of valid input");
 }

@@ -6,7 +6,7 @@ use crossterm::{
 };
 use ratatui::{
     backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
@@ -35,6 +35,8 @@ pub struct TuiForm {
     pub error_message: Option<String>,
     pub compact_mode: bool,
     cursor_position: usize,  // Track cursor position within the current field
+    button_selected: bool,  // Track if a button is selected
+    selected_button: usize,  // 0 = Add/Submit, 1 = Cancel
 }
 
 impl TuiForm {
@@ -44,11 +46,13 @@ impl TuiForm {
             current_field: 0,
             title,
             help_text: vec![
-                "Tab/↓ - Next field | ↑ - Previous | ← → - Move cursor | Ctrl+S - SUBMIT FORM | Ctrl+C/Esc - CANCEL".to_string(),
+                "Tab/↓ - Next | ↑ - Previous | ← → - Move cursor | Enter on button - Submit/Cancel".to_string(),
             ],
             error_message: None,
             compact_mode: true,
             cursor_position: 0,
+            button_selected: false,
+            selected_button: 0,
         }
     }
 
@@ -56,14 +60,21 @@ impl TuiForm {
         let mut form = Self::new(format!("Create Document in '{}'", collection_name));
         
         for field in &schema.fields {
+            // Set empty arrays by default, use sample for other types
+            let default_value = if field.field_type == "array" {
+                "[]".to_string()
+            } else {
+                field.sample_values.first().map(|v| v.clone()).unwrap_or_default()
+            };
+            
             form.fields.push(FormField {
                 name: field.name.clone(),
                 field_type: field.field_type.clone(),
-                value: field.sample_values.first().map(|v| v.clone()).unwrap_or_default(),
+                value: default_value.clone(),
                 required: field.is_required,
                 description: Some(format!("{} values, {} unique, frequency: {}", 
                     field.sample_values.len(), field.unique_values, field.frequency)),
-                default_value: field.sample_values.first().map(|v| v.clone()),
+                default_value: Some(default_value),
             });
         }
         
@@ -238,55 +249,130 @@ impl TuiForm {
                         match key.code {
                             KeyCode::Tab => {
                                 // Validate and save current field
-                                if self.current_field < self.fields.len() {
+                                if !self.button_selected && self.current_field < self.fields.len() {
                                     if let Err(e) = self.validate_and_set_field(self.current_field, &edit_buffer) {
                                         self.error_message = Some(e);
                                     } else {
                                         self.error_message = None;
-                                        // Move to next field
-                                        self.current_field = (self.current_field + 1) % self.fields.len().max(1);
+                                        // Move to next field or button
+                                        if self.current_field == self.fields.len() - 1 {
+                                            // Move to buttons
+                                            self.button_selected = true;
+                                            self.selected_button = 0;
+                                            editing_field = false;
+                                        } else {
+                                            self.current_field += 1;
+                                            edit_buffer = self.fields[self.current_field].value.clone();
+                                            self.cursor_position = edit_buffer.len();
+                                        }
+                                    }
+                                } else if self.button_selected {
+                                    // Switch between buttons
+                                    self.selected_button = (self.selected_button + 1) % 2;
+                                }
+                            }
+                            KeyCode::BackTab => {
+                                if self.button_selected {
+                                    if self.selected_button > 0 {
+                                        self.selected_button -= 1;
+                                    } else {
+                                        // Move back to fields
+                                        self.button_selected = false;
+                                        self.current_field = self.fields.len().saturating_sub(1);
+                                        editing_field = true;
+                                        edit_buffer = self.fields[self.current_field].value.clone();
+                                        self.cursor_position = edit_buffer.len();
+                                    }
+                                } else {
+                                    // Save current field and move to previous
+                                    if self.current_field < self.fields.len() {
+                                        self.fields[self.current_field].value = edit_buffer.clone();
+                                        self.error_message = None;
+                                    }
+                                    if self.current_field > 0 {
+                                        self.current_field -= 1;
+                                    } else {
+                                        self.current_field = self.fields.len().saturating_sub(1);
+                                    }
+                                    edit_buffer = self.fields[self.current_field].value.clone();
+                                    self.cursor_position = edit_buffer.len();
+                                }
+                            }
+                            KeyCode::Up => {
+                                if self.button_selected {
+                                    // Move back to last field
+                                    self.button_selected = false;
+                                    self.current_field = self.fields.len().saturating_sub(1);
+                                    editing_field = true;
+                                    edit_buffer = self.fields[self.current_field].value.clone();
+                                    self.cursor_position = edit_buffer.len();
+                                } else {
+                                    // Save current field and move up
+                                    if self.current_field < self.fields.len() {
+                                        self.fields[self.current_field].value = edit_buffer.clone();
+                                        self.error_message = None;
+                                    }
+                                    if self.current_field > 0 {
+                                        self.current_field -= 1;
                                         edit_buffer = self.fields[self.current_field].value.clone();
                                         self.cursor_position = edit_buffer.len();
                                     }
                                 }
                             }
-                            KeyCode::BackTab => {
-                                // Save current field and move to previous
-                                if self.current_field < self.fields.len() {
-                                    self.fields[self.current_field].value = edit_buffer.clone();
-                                    self.error_message = None;
-                                }
-                                if self.current_field > 0 {
-                                    self.current_field -= 1;
-                                } else {
-                                    self.current_field = self.fields.len().saturating_sub(1);
-                                }
-                                edit_buffer = self.fields[self.current_field].value.clone();
-                                self.cursor_position = edit_buffer.len();
-                            }
-                            KeyCode::Up => {
-                                // Save current field and move up
-                                if self.current_field < self.fields.len() {
-                                    self.fields[self.current_field].value = edit_buffer.clone();
-                                    self.error_message = None;
-                                }
-                                if self.current_field > 0 {
-                                    self.current_field -= 1;
-                                    edit_buffer = self.fields[self.current_field].value.clone();
-                                    self.cursor_position = edit_buffer.len();
+                            KeyCode::Down => {
+                                if !self.button_selected {
+                                    // Validate and save current field, then move down
+                                    if self.current_field < self.fields.len() {
+                                        if let Err(e) = self.validate_and_set_field(self.current_field, &edit_buffer) {
+                                            self.error_message = Some(e);
+                                        } else {
+                                            self.error_message = None;
+                                            if self.current_field < self.fields.len().saturating_sub(1) {
+                                                self.current_field += 1;
+                                                edit_buffer = self.fields[self.current_field].value.clone();
+                                                self.cursor_position = edit_buffer.len();
+                                            } else {
+                                                // Move to buttons
+                                                self.button_selected = true;
+                                                self.selected_button = 0;
+                                                editing_field = false;
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            KeyCode::Down | KeyCode::Enter => {
-                                // Validate and save current field, then move down
-                                if self.current_field < self.fields.len() {
-                                    if let Err(e) = self.validate_and_set_field(self.current_field, &edit_buffer) {
-                                        self.error_message = Some(e);
+                            KeyCode::Enter => {
+                                if self.button_selected {
+                                    // Handle button press
+                                    if self.selected_button == 0 {
+                                        // Submit button
+                                        // Validate all required fields
+                                        if let Err(e) = self.validate_all_fields() {
+                                            self.error_message = Some(e);
+                                        } else {
+                                            return Ok(Some(self.to_json()?));
+                                        }
                                     } else {
-                                        self.error_message = None;
-                                        if self.current_field < self.fields.len().saturating_sub(1) {
-                                            self.current_field += 1;
-                                            edit_buffer = self.fields[self.current_field].value.clone();
-                                            self.cursor_position = edit_buffer.len();
+                                        // Cancel button
+                                        return Ok(None);
+                                    }
+                                } else {
+                                    // Move to next field like Down
+                                    if self.current_field < self.fields.len() {
+                                        if let Err(e) = self.validate_and_set_field(self.current_field, &edit_buffer) {
+                                            self.error_message = Some(e);
+                                        } else {
+                                            self.error_message = None;
+                                            if self.current_field < self.fields.len().saturating_sub(1) {
+                                                self.current_field += 1;
+                                                edit_buffer = self.fields[self.current_field].value.clone();
+                                                self.cursor_position = edit_buffer.len();
+                                            } else {
+                                                // Move to buttons
+                                                self.button_selected = true;
+                                                self.selected_button = 0;
+                                                editing_field = false;
+                                            }
                                         }
                                     }
                                 }
@@ -350,10 +436,50 @@ impl TuiForm {
                             _ => {}
                         }
                     } else {
-                        // Should not reach here in compact mode as we start in editing mode
-                        editing_field = true;
-                        if self.current_field < self.fields.len() {
-                            edit_buffer = self.fields[self.current_field].value.clone();
+                        // Handle button navigation when not editing
+                        if self.button_selected {
+                            match key.code {
+                                KeyCode::Left => {
+                                    self.selected_button = 0; // Move to Add button
+                                }
+                                KeyCode::Right => {
+                                    self.selected_button = 1; // Move to Cancel button
+                                }
+                                KeyCode::Tab => {
+                                    self.selected_button = (self.selected_button + 1) % 2;
+                                }
+                                KeyCode::Enter => {
+                                    if self.selected_button == 0 {
+                                        // Submit
+                                        if let Err(e) = self.validate_all_fields() {
+                                            self.error_message = Some(e);
+                                        } else {
+                                            return Ok(Some(self.to_json()?));
+                                        }
+                                    } else {
+                                        // Cancel
+                                        return Ok(None);
+                                    }
+                                }
+                                KeyCode::Up => {
+                                    // Go back to fields
+                                    self.button_selected = false;
+                                    self.current_field = self.fields.len().saturating_sub(1);
+                                    editing_field = true;
+                                    edit_buffer = self.fields[self.current_field].value.clone();
+                                    self.cursor_position = edit_buffer.len();
+                                }
+                                KeyCode::Esc | KeyCode::Char('c') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                                    return Ok(None);
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            // Should not reach here in compact mode as we start in editing mode
+                            editing_field = true;
+                            if self.current_field < self.fields.len() {
+                                edit_buffer = self.fields[self.current_field].value.clone();
+                            }
                         }
                     }
                 }
@@ -365,15 +491,17 @@ impl TuiForm {
         // Calculate heights based on content
         let error_height = if self.error_message.is_some() { 3 } else { 0 };
         let form_height = (self.fields.len() as u16 * 2) + 2; // 2 lines per field + borders
-        let help_height = 2; // Compact help bar
+        let button_height = 3; // Height for buttons
+        let help_height = 2; // Always show help bar
         
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),  // Title
                 Constraint::Length(form_height), // Compact form
+                Constraint::Length(button_height), // Buttons
                 Constraint::Length(error_height), // Error message (if any)
-                Constraint::Length(help_height), // Help bar
+                Constraint::Length(help_height), // Help bar (always visible)
                 Constraint::Min(0), // Remaining space
             ])
             .split(f.area());
@@ -463,6 +591,41 @@ impl TuiForm {
             .wrap(Wrap { trim: false });
         f.render_widget(form_block, chunks[1]);
         
+        // Render buttons
+        let button_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(50),
+                Constraint::Percentage(50),
+            ])
+            .split(chunks[2]);
+        
+        // Add/Submit button
+        let add_style = if self.button_selected && self.selected_button == 0 {
+            Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        };
+        
+        let add_button = Paragraph::new(Text::from(" [ ADD ] "))
+            .style(add_style)
+            .block(Block::default().borders(Borders::ALL))
+            .alignment(Alignment::Center);
+        f.render_widget(add_button, button_chunks[0]);
+        
+        // Cancel button
+        let cancel_style = if self.button_selected && self.selected_button == 1 {
+            Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Red)
+        };
+        
+        let cancel_button = Paragraph::new(Text::from(" [ CANCEL ] "))
+            .style(cancel_style)
+            .block(Block::default().borders(Borders::ALL))
+            .alignment(Alignment::Center);
+        f.render_widget(cancel_button, button_chunks[1]);
+        
         // Error message (if any)
         if let Some(error) = &self.error_message {
             let error_widget = Paragraph::new(Text::from(vec![
@@ -470,11 +633,11 @@ impl TuiForm {
             ]))
             .block(Block::default().borders(Borders::ALL))
             .wrap(Wrap { trim: true });
-            f.render_widget(error_widget, chunks[2]);
+            f.render_widget(error_widget, chunks[3]);
         }
         
-        // Compact help bar with clearer instructions
-        let help_index = if self.error_message.is_some() { 3 } else { 2 };
+        // Help bar (always visible)
+        let help_index = 4; // Always at index 4
         if help_index < chunks.len() {
             let help = Paragraph::new(Text::from(vec![
                 Line::from(vec![
@@ -535,11 +698,18 @@ fn format_value_display(value: &Value) -> String {
 
 fn parse_field_value(value_str: &str, field_type: &str) -> Result<Value, FirebaseError> {
     if value_str.trim().is_empty() {
+        // Empty arrays should return empty array, not null
+        if field_type == "array" {
+            return Ok(Value::Array(Vec::new()));
+        }
         return Ok(Value::Null);
     }
 
     match field_type {
-        "string" => Ok(Value::String(value_str.to_string())),
+        "string" => {
+            // Don't require quotes for strings - take the value as-is
+            Ok(Value::String(value_str.to_string()))
+        }
         "integer" => {
             value_str.parse::<i64>()
                 .map(|n| Value::Number(n.into()))
