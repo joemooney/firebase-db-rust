@@ -1,0 +1,245 @@
+{
+  "version": "1.0.0",
+  "collections": {
+    "_metadata_collections": {
+      "name": "_metadata_collections",
+      "description": "Discovered collection with 2 documents",
+      "fields": [
+        {
+          "name": "fields",
+          "field_type": "string",
+          "required": true,
+          "user_required": true,
+          "auto_generated": false,
+          "default_value": "[{\"name\":\"id\",\"field_type\":\"String\",\"required\":false,\"default_value\":null,\"description\":\"User ID\"},{\"name\":\"name\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"User's full name\"},{\"name\":\"email\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"User's email address\"},{\"name\":\"age\",\"field_type\":\"Integer\",\"required\":true,\"default_value\":{\"integerValue\":\"18\"},\"description\":\"User's age\"},{\"name\":\"created_at\",\"field_type\":\"Timestamp\",\"required\":true,\"default_value\":null,\"description\":\"Account creation timestamp\"}]",
+          "description": "Found in 2/2 documents",
+          "sample_values": [
+            "\"[{\"name\":\"id\",\"field_type\":\"String\",\"required\":false,\"default_value\":null,\"description\":\"User ID\"},{\"name\":\"name\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"User's full name\"},{\"name\":\"email\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"User's email address\"},{\"name\":\"age\",\"field_type\":\"Integer\",\"required\":true,\"default_value\":{\"integerValue\":\"18\"},\"description\":\"User's age\"},{\"name\":\"created_at\",\"field_type\":\"Timestamp\",\"required\":true,\"default_value\":null,\"description\":\"Account creation timestamp\"}]\"",
+            "\"[{\"name\":\"title\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"Post title\"},{\"name\":\"content\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"Post content\"},{\"name\":\"author_id\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"Reference to user ID\"},{\"name\":\"tags\",\"field_type\":\"Array\",\"required\":false,\"default_value\":{\"arrayValue\":{\"values\":[]}},\"description\":\"Post tags\"},{\"name\":\"published\",\"field_type\":\"Boolean\",\"required\":true,\"default_value\":{\"booleanValue\":false},\"description\":\"Publication status\"}]\""
+          ]
+        },
+        {
+          "name": "name",
+          "field_type": "string",
+          "required": true,
+          "user_required": true,
+          "auto_generated": false,
+          "default_value": "users",
+          "description": "Found in 2/2 documents",
+          "sample_values": [
+            "\"users\"",
+            "\"posts\""
+          ]
+        },
+        {
+          "name": "created_at",
+          "field_type": "timestamp",
+          "required": true,
+          "user_required": false,
+          "auto_generated": true,
+          "default_value": null,
+          "description": "Found in 2/2 documents (auto-generated)",
+          "sample_values": [
+            "2024-01-01T00:00:00Z"
+          ]
+        },
+        {
+          "name": "indexes",
+          "field_type": "string",
+          "required": true,
+          "user_required": true,
+          "auto_generated": false,
+          "default_value": "[{\"fields\":[{\"field_path\":\"email\",\"order\":\"Ascending\"}],\"unique\":true},{\"fields\":[{\"field_path\":\"age\",\"order\":\"Ascending\"},{\"field_path\":\"created_at\",\"order\":\"Descending\"}],\"unique\":false}]",
+          "description": "Found in 2/2 documents",
+          "sample_values": [
+            "\"[{\"fields\":[{\"field_path\":\"email\",\"order\":\"Ascending\"}],\"unique\":true},{\"fields\":[{\"field_path\":\"age\",\"order\":\"Ascending\"},{\"field_path\":\"created_at\",\"order\":\"Descending\"}],\"unique\":false}]\"",
+            "\"[{\"fields\":[{\"field_path\":\"author_id\",\"order\":\"Ascending\"},{\"field_path\":\"published\",\"order\":\"Ascending\"}],\"unique\":false}]\""
+          ]
+        },
+        {
+          "name": "validation_rules",
+          "field_type": "string",
+          "required": true,
+          "user_required": true,
+          "auto_generated": false,
+          "default_value": "[{\"field\":\"title\",\"rule\":{\"MinLength\":5}},{\"field\":\"title\",\"rule\":{\"MaxLength\":200}},{\"field\":\"content\",\"rule\":{\"MinLength\":10}}]",
+          "description": "Found in 2/2 documents",
+          "sample_values": [
+            "\"[{\"field\":\"title\",\"rule\":{\"MinLength\":5}},{\"field\":\"title\",\"rule\":{\"MaxLength\":200}},{\"field\":\"content\",\"rule\":{\"MinLength\":10}}]\"",
+            "\"[{\"field\":\"email\",\"rule\":\"Email\"},{\"field\":\"age\",\"rule\":{\"Min\":18.0}},{\"field\":\"age\",\"rule\":{\"Max\":120.0}},{\"field\":\"name\",\"rule\":{\"MinLength\":2}},{\"field\":\"name\",\"rule\":{\"MaxLength\":100}}]\""
+          ]
+        }
+      ],
+      "indexes": [],
+      "validation_rules": []
+    },
+    "users": {
+      "name": "users",
+      "description": "Discovered collection with 26 documents",
+      "fields": [
+        {
+          "name": "name",
+          "field_type": "string",
+          "required": true,
+          "user_required": true,
+          "auto_generated": false,
+          "default_value": "Diana Prince",
+          "description": "Found in 26/26 documents",
+          "sample_values": [
+            "\"Diana Prince\"",
+            "\"Alice Smith\"",
+            "\"Test User\"",
+            "\"Bob Smith\"",
+            "\"David Wilson\""
+          ]
+        },
+        {
+          "name": "age",
+          "field_type": "integer",
+          "required": true,
+          "user_required": true,
+          "auto_generated": false,
+          "default_value": 25,
+          "description": "Found in 26/26 documents",
+          "sample_values": [
+            "25",
+            "35",
+            "45",
+            "34",
+            "28"
+          ]
+        },
+        {
+          "name": "email",
+          "field_type": "string",
+          "required": false,
+          "user_required": false,
+          "auto_generated": false,
+          "default_value": null,
+          "description": "Found in 25/26 documents",
+          "sample_values": [
+            "\"diana@example.com\"",
+            "\"alice@example.com\"",
+            "\"david@example.com\"",
+            "\"test@example.com\"",
+            "\"bob@example.com\""
+          ]
+        },
+        {
+          "name": "created_at",
+          "field_type": "mixed",
+          "required": true,
+          "user_required": false,
+          "auto_generated": true,
+          "default_value": null,
+          "description": "Found in 26/26 documents (auto-generated)",
+          "sample_values": [
+            "\"2024-01-01T00:00:00+00:00\"",
+            "2024-01-01T00:00:00Z",
+            "\"2025-08-10T17:43:58.456792306+00:00\"",
+            "\"2025-08-10T02:05:44.262015468+00:00\"",
+            "\"2025-08-10T02:07:39.978531024+00:00\""
+          ]
+        },
+        {
+          "name": "tags",
+          "field_type": "array",
+          "required": false,
+          "user_required": false,
+          "auto_generated": false,
+          "default_value": null,
+          "description": "Found in 1/26 documents",
+          "sample_values": [
+            "[...]"
+          ]
+        },
+        {
+          "name": "updated_at",
+          "field_type": "mixed",
+          "required": true,
+          "user_required": false,
+          "auto_generated": true,
+          "default_value": null,
+          "description": "Found in 26/26 documents (auto-generated)",
+          "sample_values": [
+            "\"2025-08-10T02:07:39.978531024+00:00\"",
+            "\"2025-08-10T17:43:58.456792306+00:00\"",
+            "\"2025-08-10T02:05:44.262015468+00:00\"",
+            "2024-01-01T00:00:00Z",
+            "\"2024-01-01T00:00:00+00:00\""
+          ]
+        }
+      ],
+      "indexes": [],
+      "validation_rules": []
+    },
+    "posts": {
+      "name": "posts",
+      "description": "Discovered collection with 1 documents",
+      "fields": [
+        {
+          "name": "content",
+          "field_type": "string",
+          "required": true,
+          "user_required": true,
+          "auto_generated": false,
+          "default_value": "Hello World",
+          "description": "Found in 1/1 documents",
+          "sample_values": [
+            "\"Hello World\""
+          ]
+        },
+        {
+          "name": "created_at",
+          "field_type": "string",
+          "required": true,
+          "user_required": false,
+          "auto_generated": true,
+          "default_value": "2025-08-10T02:23:25.400994327+00:00",
+          "description": "Found in 1/1 documents (auto-generated)",
+          "sample_values": [
+            "\"2025-08-10T02:23:25.400994327+00:00\""
+          ]
+        },
+        {
+          "name": "title",
+          "field_type": "string",
+          "required": true,
+          "user_required": true,
+          "auto_generated": false,
+          "default_value": "My First Post",
+          "description": "Found in 1/1 documents",
+          "sample_values": [
+            "\"My First Post\""
+          ]
+        },
+        {
+          "name": "published",
+          "field_type": "boolean",
+          "required": true,
+          "user_required": true,
+          "auto_generated": false,
+          "default_value": true,
+          "description": "Found in 1/1 documents",
+          "sample_values": [
+            "true"
+          ]
+        },
+        {
+          "name": "updated_at",
+          "field_type": "string",
+          "required": true,
+          "user_required": false,
+          "auto_generated": true,
+          "default_value": "2025-08-10T02:23:25.400994327+00:00",
+          "description": "Found in 1/1 documents (auto-generated)",
+          "sample_values": [
+            "\"2025-08-10T02:23:25.400994327+00:00\""
+          ]
+        }
+      ],
+      "indexes": [],
+      "validation_rules": []
+    }
+  }
+}

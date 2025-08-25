@@ -1,0 +1,91 @@
+{
+  "version": "1.0.0",
+  "collections": {
+    "_metadata_collections": {
+      "name": "_metadata_collections",
+      "description": "Discovered collection with 2 documents",
+      "fields": [
+        {
+          "name": "validation_rules",
+          "field_type": "string",
+          "required": true,
+          "default_value": "[{\"field\":\"email\",\"rule\":\"Email\"},{\"field\":\"age\",\"rule\":{\"Min\":18.0}},{\"field\":\"age\",\"rule\":{\"Max\":120.0}},{\"field\":\"name\",\"rule\":{\"MinLength\":2}},{\"field\":\"name\",\"rule\":{\"MaxLength\":100}}]",
+          "description": "Found in 2/2 documents. Samples: \"[{\"field\":\"email\",\"rule\":\"Email\"},{\"field\":\"age\",\"rule\":{\"Min\":18.0}},{\"field\":\"age\",\"rule\":{\"Max\":120.0}},{\"field\":\"name\",\"rule\":{\"MinLength\":2}},{\"field\":\"name\",\"rule\":{\"MaxLength\":100}}]\", \"[{\"field\":\"title\",\"rule\":{\"MinLength\":5}},{\"field\":\"title\",\"rule\":{\"MaxLength\":200}},{\"field\":\"content\",\"rule\":{\"MinLength\":10}}]\""
+        },
+        {
+          "name": "fields",
+          "field_type": "string",
+          "required": true,
+          "default_value": "[{\"name\":\"title\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"Post title\"},{\"name\":\"content\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"Post content\"},{\"name\":\"author_id\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"Reference to user ID\"},{\"name\":\"tags\",\"field_type\":\"Array\",\"required\":false,\"default_value\":{\"arrayValue\":{\"values\":[]}},\"description\":\"Post tags\"},{\"name\":\"published\",\"field_type\":\"Boolean\",\"required\":true,\"default_value\":{\"booleanValue\":false},\"description\":\"Publication status\"}]",
+          "description": "Found in 2/2 documents. Samples: \"[{\"name\":\"title\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"Post title\"},{\"name\":\"content\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"Post content\"},{\"name\":\"author_id\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"Reference to user ID\"},{\"name\":\"tags\",\"field_type\":\"Array\",\"required\":false,\"default_value\":{\"arrayValue\":{\"values\":[]}},\"description\":\"Post tags\"},{\"name\":\"published\",\"field_type\":\"Boolean\",\"required\":true,\"default_value\":{\"booleanValue\":false},\"description\":\"Publication status\"}]\", \"[{\"name\":\"id\",\"field_type\":\"String\",\"required\":false,\"default_value\":null,\"description\":\"User ID\"},{\"name\":\"name\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"User's full name\"},{\"name\":\"email\",\"field_type\":\"String\",\"required\":true,\"default_value\":null,\"description\":\"User's email address\"},{\"name\":\"age\",\"field_type\":\"Integer\",\"required\":true,\"default_value\":{\"integerValue\":\"18\"},\"description\":\"User's age\"},{\"name\":\"created_at\",\"field_type\":\"Timestamp\",\"required\":true,\"default_value\":null,\"description\":\"Account creation timestamp\"}]\""
+        },
+        {
+          "name": "indexes",
+          "field_type": "string",
+          "required": true,
+          "default_value": "[{\"fields\":[{\"field_path\":\"author_id\",\"order\":\"Ascending\"},{\"field_path\":\"published\",\"order\":\"Ascending\"}],\"unique\":false}]",
+          "description": "Found in 2/2 documents. Samples: \"[{\"fields\":[{\"field_path\":\"author_id\",\"order\":\"Ascending\"},{\"field_path\":\"published\",\"order\":\"Ascending\"}],\"unique\":false}]\", \"[{\"fields\":[{\"field_path\":\"email\",\"order\":\"Ascending\"}],\"unique\":true},{\"fields\":[{\"field_path\":\"age\",\"order\":\"Ascending\"},{\"field_path\":\"created_at\",\"order\":\"Descending\"}],\"unique\":false}]\""
+        },
+        {
+          "name": "name",
+          "field_type": "string",
+          "required": true,
+          "default_value": "users",
+          "description": "Found in 2/2 documents. Samples: \"users\", \"posts\""
+        },
+        {
+          "name": "created_at",
+          "field_type": "timestamp",
+          "required": true,
+          "default_value": null,
+          "description": "Found in 2/2 documents. Samples: 2024-01-01T00:00:00Z"
+        }
+      ],
+      "indexes": [],
+      "validation_rules": []
+    },
+    "users": {
+      "name": "users",
+      "description": "Discovered collection with 23 documents",
+      "fields": [
+        {
+          "name": "age",
+          "field_type": "integer",
+          "required": true,
+          "default_value": 34,
+          "description": "Found in 23/23 documents. Samples: 34, 45, 35, 25, 28"
+        },
+        {
+          "name": "updated_at",
+          "field_type": "mixed",
+          "required": true,
+          "default_value": null,
+          "description": "Found in 23/23 documents. Samples: \"2024-01-01T00:00:00+00:00\", 2024-01-01T00:00:00Z"
+        },
+        {
+          "name": "created_at",
+          "field_type": "mixed",
+          "required": true,
+          "default_value": null,
+          "description": "Found in 23/23 documents. Samples: \"2024-01-01T00:00:00+00:00\", 2024-01-01T00:00:00Z"
+        },
+        {
+          "name": "email",
+          "field_type": "string",
+          "required": true,
+          "default_value": "diana@example.com",
+          "description": "Found in 23/23 documents. Samples: \"diana@example.com\", \"david@example.com\", \"charlie@example.com\", \"alice@example.com\", \"bob@example.com\""
+        },
+        {
+          "name": "name",
+          "field_type": "string",
+          "required": true,
+          "default_value": "Diana Prince",
+          "description": "Found in 23/23 documents. Samples: \"Diana Prince\", \"David Wilson\", \"Alice Smith\", \"Charlie Brown\", \"Bob Smith\""
+        }
+      ],
+      "indexes": [],
+      "validation_rules": []
+    }
+  }
+}

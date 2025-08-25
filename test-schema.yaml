@@ -1,0 +1,197 @@
+version: 1.0.0
+collections:
+  posts:
+    name: posts
+    description: User posts
+    fields:
+    - name: title
+      field_type: string
+      required: true
+      user_required: true
+      auto_generated: false
+      default_value: null
+      description: Post title
+      sample_values:
+      - My First Post
+      - Hello World
+    - name: content
+      field_type: string
+      required: true
+      user_required: true
+      auto_generated: false
+      default_value: null
+      description: Post content
+      sample_values:
+      - This is my first blog post...
+      - Welcome to my blog!
+    - name: author_id
+      field_type: string
+      required: true
+      user_required: true
+      auto_generated: false
+      default_value: null
+      description: Reference to user ID
+      sample_values:
+      - user_123
+      - user_456
+    - name: published
+      field_type: boolean
+      required: false
+      user_required: false
+      auto_generated: false
+      default_value: false
+      description: Publication status
+      sample_values:
+      - 'true'
+      - 'false'
+    - name: created_at
+      field_type: timestamp
+      required: true
+      user_required: false
+      auto_generated: true
+      default_value: null
+      description: Creation timestamp
+      sample_values:
+      - 2024-01-01T12:00:00Z
+      - 2024-01-15T14:30:00Z
+    indexes:
+    - fields:
+      - field_path: author_id
+        order: asc
+      - field_path: published
+        order: asc
+      unique: false
+      description: Posts by author and publication status
+    validation_rules:
+    - field: title
+      rule_type: min_length
+      value: 5
+      description: Title must be at least 5 characters
+    - field: title
+      rule_type: max_length
+      value: 200
+      description: Title must be at most 200 characters
+    - field: content
+      rule_type: min_length
+      value: 10
+      description: Content must be at least 10 characters
+  users:
+    name: users
+    description: User accounts
+    fields:
+    - name: id
+      field_type: string
+      required: false
+      user_required: false
+      auto_generated: true
+      default_value: null
+      description: Auto-generated user ID
+      sample_values:
+      - user_123
+      - user_456
+    - name: name
+      field_type: string
+      required: true
+      user_required: true
+      auto_generated: false
+      default_value: null
+      description: User's full name
+      sample_values:
+      - John Doe
+      - Jane Smith
+      - Alice Johnson
+    - name: email
+      field_type: string
+      required: true
+      user_required: true
+      auto_generated: false
+      default_value: null
+      description: User's email address
+      sample_values:
+      - john@example.com
+      - jane@example.com
+    - name: age
+      field_type: integer
+      required: true
+      user_required: true
+      auto_generated: false
+      default_value: 18
+      description: User's age
+      sample_values:
+      - '25'
+      - '30'
+      - '28'
+    - name: active
+      field_type: boolean
+      required: false
+      user_required: false
+      auto_generated: false
+      default_value: true
+      description: Account status
+      sample_values:
+      - 'true'
+      - 'false'
+    - name: created_at
+      field_type: timestamp
+      required: true
+      user_required: false
+      auto_generated: true
+      default_value: null
+      description: Account creation timestamp
+      sample_values:
+      - 2024-01-01T12:00:00Z
+      - 2024-01-15T09:30:00Z
+    - name: tags
+      field_type: array
+      required: false
+      user_required: false
+      auto_generated: false
+      default_value: []
+      description: User tags
+      sample_values:
+      - '["admin", "user"]'
+      - '["guest"]'
+    - name: profile
+      field_type: map
+      required: false
+      user_required: false
+      auto_generated: false
+      default_value: null
+      description: User profile data
+      sample_values:
+      - '{"bio": "Developer"}'
+      - '{"location": "NYC"}'
+    indexes:
+    - fields:
+      - field_path: email
+        order: asc
+      unique: true
+      description: Unique email index
+    - fields:
+      - field_path: active
+        order: asc
+      - field_path: created_at
+        order: desc
+      unique: false
+      description: Active users by creation date
+    validation_rules:
+    - field: email
+      rule_type: email
+      value: null
+      description: Must be valid email format
+    - field: age
+      rule_type: min
+      value: 13
+      description: Minimum age 13
+    - field: age
+      rule_type: max
+      value: 120
+      description: Maximum age 120
+    - field: name
+      rule_type: min_length
+      value: 2
+      description: Name must be at least 2 characters
+    - field: name
+      rule_type: max_length
+      value: 100
+      description: Name must be at most 100 characters

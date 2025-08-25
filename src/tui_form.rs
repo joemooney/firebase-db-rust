@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::io;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
@@ -7,14 +6,14 @@ use crossterm::{
 };
 use ratatui::{
     backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
 use serde_json::{Map, Value};
-use crate::collections::{CollectionSchema, FieldInfo};
+use crate::collections::CollectionSchema;
 use crate::error::FirebaseError;
 
 #[derive(Debug, Clone)]
@@ -33,6 +32,8 @@ pub struct TuiForm {
     pub current_field: usize,
     pub title: String,
     pub help_text: Vec<String>,
+    pub error_message: Option<String>,
+    pub compact_mode: bool,
 }
 
 impl TuiForm {
@@ -42,12 +43,10 @@ impl TuiForm {
             current_field: 0,
             title,
             help_text: vec![
-                "↑/↓ - Navigate fields".to_string(),
-                "Enter - Edit field".to_string(),
-                "Tab - Next field".to_string(),
-                "Ctrl+S - Save and submit".to_string(),
-                "Ctrl+C/Esc - Cancel".to_string(),
+                "Tab/↓ - Next | Shift+Tab/↑ - Previous | Ctrl+S - Save | Esc - Cancel".to_string(),
             ],
+            error_message: None,
+            compact_mode: true,
         }
     }
 
@@ -121,6 +120,75 @@ impl TuiForm {
         Ok(Value::Object(map))
     }
 
+    fn validate_and_set_field(&mut self, index: usize, value: &str) -> Result<(), String> {
+        if index >= self.fields.len() {
+            return Ok(());
+        }
+        
+        let field = &self.fields[index];
+        
+        // Check if required field is empty
+        if field.required && value.trim().is_empty() {
+            return Err(format!("Required field '{}' cannot be empty", field.name));
+        }
+        
+        // Skip validation if field is empty and not required
+        if !field.required && value.trim().is_empty() {
+            self.fields[index].value = value.to_string();
+            return Ok(());
+        }
+        
+        // Validate based on field type
+        match field.field_type.as_str() {
+            "integer" => {
+                if let Err(_) = value.parse::<i64>() {
+                    return Err(format!("Invalid integer. Example: 42, -10, 0"));
+                }
+            }
+            "number" => {
+                if let Err(_) = value.parse::<f64>() {
+                    return Err(format!("Invalid number. Example: 3.14, -0.5, 42"));
+                }
+            }
+            "boolean" => {
+                let lower = value.to_lowercase();
+                if !["true", "false", "yes", "no", "1", "0"].contains(&lower.as_str()) {
+                    return Err(format!("Invalid boolean. Use: true, false, yes, no, 1, or 0"));
+                }
+            }
+            "array" => {
+                if !value.trim().is_empty() && serde_json::from_str::<Value>(value).is_err() {
+                    return Err(format!("Invalid JSON array. Example: [1, 2, 3] or [\"a\", \"b\"]"));
+                }
+            }
+            "object" => {
+                if !value.trim().is_empty() && serde_json::from_str::<Value>(value).is_err() {
+                    return Err(format!("Invalid JSON object. Example: {{\"key\": \"value\"}}"));
+                }
+            }
+            "timestamp" => {
+                if !value.trim().is_empty() && value.to_lowercase() != "now" {
+                    if chrono::DateTime::parse_from_rfc3339(value).is_err() {
+                        return Err(format!("Invalid timestamp. Use ISO format (2024-01-01T12:00:00Z) or 'now'"));
+                    }
+                }
+            }
+            _ => {} // String type, no validation needed
+        }
+        
+        self.fields[index].value = value.to_string();
+        Ok(())
+    }
+    
+    fn validate_all_fields(&self) -> Result<(), String> {
+        for field in &self.fields {
+            if field.required && field.value.trim().is_empty() {
+                return Err(format!("Required field '{}' is empty", field.name));
+            }
+        }
+        Ok(())
+    }
+
     pub fn run(&mut self) -> Result<Option<Value>, FirebaseError> {
         // Set up terminal
         enable_raw_mode().map_err(|e| FirebaseError::ConfigError(format!("Terminal setup failed: {}", e)))?;
@@ -147,8 +215,13 @@ impl TuiForm {
     }
 
     fn run_app<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<Option<Value>, FirebaseError> {
-        let mut editing_field = false;
-        let mut edit_buffer = String::new();
+        // Start in editing mode for the first field
+        let mut editing_field = true;
+        let mut edit_buffer = if !self.fields.is_empty() {
+            self.fields[0].value.clone()
+        } else {
+            String::new()
+        };
 
         loop {
             terminal.draw(|f| self.ui(f, editing_field, &edit_buffer))
@@ -160,56 +233,91 @@ impl TuiForm {
                 if key.kind == KeyEventKind::Press {
                     if editing_field {
                         match key.code {
-                            KeyCode::Enter => {
+                            KeyCode::Tab => {
+                                // Validate and save current field
+                                if self.current_field < self.fields.len() {
+                                    if let Err(e) = self.validate_and_set_field(self.current_field, &edit_buffer) {
+                                        self.error_message = Some(e);
+                                    } else {
+                                        self.error_message = None;
+                                        // Move to next field
+                                        self.current_field = (self.current_field + 1) % self.fields.len().max(1);
+                                        edit_buffer = self.fields[self.current_field].value.clone();
+                                    }
+                                }
+                            }
+                            KeyCode::BackTab => {
+                                // Save current field and move to previous
                                 if self.current_field < self.fields.len() {
                                     self.fields[self.current_field].value = edit_buffer.clone();
+                                    self.error_message = None;
                                 }
-                                editing_field = false;
-                                edit_buffer.clear();
+                                if self.current_field > 0 {
+                                    self.current_field -= 1;
+                                } else {
+                                    self.current_field = self.fields.len().saturating_sub(1);
+                                }
+                                edit_buffer = self.fields[self.current_field].value.clone();
+                            }
+                            KeyCode::Up => {
+                                // Save current field and move up
+                                if self.current_field < self.fields.len() {
+                                    self.fields[self.current_field].value = edit_buffer.clone();
+                                    self.error_message = None;
+                                }
+                                if self.current_field > 0 {
+                                    self.current_field -= 1;
+                                    edit_buffer = self.fields[self.current_field].value.clone();
+                                }
+                            }
+                            KeyCode::Down | KeyCode::Enter => {
+                                // Validate and save current field, then move down
+                                if self.current_field < self.fields.len() {
+                                    if let Err(e) = self.validate_and_set_field(self.current_field, &edit_buffer) {
+                                        self.error_message = Some(e);
+                                    } else {
+                                        self.error_message = None;
+                                        if self.current_field < self.fields.len().saturating_sub(1) {
+                                            self.current_field += 1;
+                                            edit_buffer = self.fields[self.current_field].value.clone();
+                                        }
+                                    }
+                                }
                             }
                             KeyCode::Esc => {
-                                editing_field = false;
-                                edit_buffer.clear();
+                                return Ok(None); // Cancel
+                            }
+                            KeyCode::Char('s') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                                // Validate current field before submitting
+                                if self.current_field < self.fields.len() {
+                                    if let Err(e) = self.validate_and_set_field(self.current_field, &edit_buffer) {
+                                        self.error_message = Some(e);
+                                    } else {
+                                        self.error_message = None;
+                                        // Validate all required fields
+                                        if let Err(e) = self.validate_all_fields() {
+                                            self.error_message = Some(e);
+                                        } else {
+                                            return Ok(Some(self.to_json()?));
+                                        }
+                                    }
+                                }
                             }
                             KeyCode::Char(c) => {
                                 edit_buffer.push(c);
+                                self.error_message = None; // Clear error on typing
                             }
                             KeyCode::Backspace => {
                                 edit_buffer.pop();
+                                self.error_message = None; // Clear error on typing
                             }
                             _ => {}
                         }
                     } else {
-                        match key.code {
-                            KeyCode::Char('c') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
-                                return Ok(None); // Cancelled
-                            }
-                            KeyCode::Char('s') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
-                                return Ok(Some(self.to_json()?)); // Submit
-                            }
-                            KeyCode::Esc => {
-                                return Ok(None); // Cancelled
-                            }
-                            KeyCode::Up => {
-                                if self.current_field > 0 {
-                                    self.current_field -= 1;
-                                }
-                            }
-                            KeyCode::Down => {
-                                if self.current_field < self.fields.len().saturating_sub(1) {
-                                    self.current_field += 1;
-                                }
-                            }
-                            KeyCode::Tab => {
-                                self.current_field = (self.current_field + 1) % self.fields.len().max(1);
-                            }
-                            KeyCode::Enter => {
-                                if self.current_field < self.fields.len() {
-                                    editing_field = true;
-                                    edit_buffer = self.fields[self.current_field].value.clone();
-                                }
-                            }
-                            _ => {}
+                        // Should not reach here in compact mode as we start in editing mode
+                        editing_field = true;
+                        if self.current_field < self.fields.len() {
+                            edit_buffer = self.fields[self.current_field].value.clone();
                         }
                     }
                 }
@@ -218,92 +326,108 @@ impl TuiForm {
     }
 
     fn ui(&self, f: &mut Frame, editing_field: bool, edit_buffer: &str) {
+        // Calculate heights based on content
+        let error_height = if self.error_message.is_some() { 3 } else { 0 };
+        let form_height = (self.fields.len() as u16 * 2) + 2; // 2 lines per field + borders
+        let help_height = 2; // Compact help bar
+        
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),  // Title
-                Constraint::Min(10),    // Form
-                Constraint::Length(self.help_text.len() as u16 + 2), // Help
+                Constraint::Length(form_height), // Compact form
+                Constraint::Length(error_height), // Error message (if any)
+                Constraint::Length(help_height), // Help bar
+                Constraint::Min(0), // Remaining space
             ])
             .split(f.area());
 
-        // Title
-        let title = Paragraph::new(Text::from(self.title.as_str()))
+        // Title with form status
+        let title_text = if editing_field {
+            format!("{} - Field {}/{}", self.title, self.current_field + 1, self.fields.len())
+        } else {
+            self.title.clone()
+        };
+        let title = Paragraph::new(Text::from(title_text))
             .block(Block::default().borders(Borders::ALL))
             .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
             .wrap(Wrap { trim: true });
         f.render_widget(title, chunks[0]);
 
-        // Form fields
-        let form_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(vec![Constraint::Min(2); self.fields.len().max(1)])
-            .split(chunks[1]);
-
+        // Compact form - all fields in one block
+        let mut form_lines = Vec::new();
+        
         for (i, field) in self.fields.iter().enumerate() {
             let is_current = i == self.current_field;
-            let style = if is_current {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            
+            let field_name = if field.required {
+                format!("{} *", field.name)
             } else {
-                Style::default().fg(Color::White)
+                field.name.clone()
             };
-
-            let border_style = if is_current {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-
+            
             let display_value = if editing_field && is_current {
                 edit_buffer
             } else {
                 &field.value
             };
-
-            let field_text = if field.required {
-                format!("{} *", field.name)
+            
+            // Field label line
+            let label_style = if is_current {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
             } else {
-                field.name.clone()
+                Style::default().fg(Color::White)
             };
-
-            let mut lines = vec![
-                Line::from(vec![
-                    Span::styled(field_text, Style::default().add_modifier(Modifier::BOLD)),
-                    Span::styled(format!(" ({})", field.field_type), Style::default().fg(Color::Gray)),
-                ])
-            ];
-
-            if let Some(desc) = &field.description {
-                lines.push(Line::from(Span::styled(desc, Style::default().fg(Color::Gray))));
-            }
-
-            lines.push(Line::from(Span::styled(display_value, style)));
-
-            let paragraph = Paragraph::new(Text::from(lines))
-                .block(Block::default().borders(Borders::ALL).border_style(border_style))
-                .wrap(Wrap { trim: false });
-
-            if i < form_chunks.len() {
-                f.render_widget(paragraph, form_chunks[i]);
-                
-                if editing_field && is_current {
-                    // Show cursor
-                    let cursor_x = form_chunks[i].x + display_value.len() as u16 + 1;
-                    let cursor_y = form_chunks[i].y + 3; // Account for border and description
-                    f.set_cursor_position((cursor_x, cursor_y));
-                }
-            }
+            
+            form_lines.push(Line::from(vec![
+                Span::styled(format!("{:<20}", field_name), label_style),
+                Span::styled(format!(" ({})", field.field_type), Style::default().fg(Color::DarkGray)),
+            ]));
+            
+            // Field value line
+            let value_style = if is_current && editing_field {
+                Style::default().fg(Color::Cyan)
+            } else if is_current {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            
+            let value_prefix = if is_current { "→ " } else { "  " };
+            form_lines.push(Line::from(vec![
+                Span::raw(value_prefix),
+                Span::styled(display_value, value_style),
+                if is_current && editing_field {
+                    Span::styled("_", Style::default().fg(Color::Cyan).add_modifier(Modifier::RAPID_BLINK))
+                } else {
+                    Span::raw("")
+                },
+            ]));
         }
-
-        // Help text
-        let help_items: Vec<ListItem> = self.help_text
-            .iter()
-            .map(|h| ListItem::new(Line::from(Span::styled(h, Style::default().fg(Color::Gray)))))
-            .collect();
-
-        let help = List::new(help_items)
-            .block(Block::default().borders(Borders::ALL).title("Help"));
-        f.render_widget(help, chunks[2]);
+        
+        let form_block = Paragraph::new(form_lines)
+            .block(Block::default().borders(Borders::ALL).title("Fields"))
+            .wrap(Wrap { trim: false });
+        f.render_widget(form_block, chunks[1]);
+        
+        // Error message (if any)
+        if let Some(error) = &self.error_message {
+            let error_widget = Paragraph::new(Text::from(vec![
+                Line::from(Span::styled(format!("⚠ {}", error), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)))
+            ]))
+            .block(Block::default().borders(Borders::ALL))
+            .wrap(Wrap { trim: true });
+            f.render_widget(error_widget, chunks[2]);
+        }
+        
+        // Compact help bar
+        let help_index = if self.error_message.is_some() { 3 } else { 2 };
+        if help_index < chunks.len() {
+            let help = Paragraph::new(Text::from(self.help_text[0].clone()))
+                .style(Style::default().fg(Color::DarkGray))
+                .block(Block::default().borders(Borders::TOP));
+            f.render_widget(help, chunks[help_index]);
+        }
     }
 }
 

@@ -1,5 +1,4 @@
 use crate::error::{FirebaseError, Result};
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Debug, Clone)]

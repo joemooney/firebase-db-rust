@@ -1,9 +1,8 @@
 use crate::error::{FirebaseError, Result};
 use crate::firebase::FirebaseClient;
-use crate::models::FirestoreValue;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use comfy_table::{Table, Cell, Color, Attribute, ContentArrangement, Row};
+use comfy_table::{Table, Cell, Color, Attribute, ContentArrangement};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectionInfo {
